@@ -649,11 +649,12 @@ class GoldGymEnv(Env):
     def update_max_op_level(self):
         opponent_level = self.read_m(self._opponent_level)
         self.max_opponent_level = max(self.max_opponent_level, opponent_level)
-        return self.max_opponent_level * 0.2
+        return self.max_opponent_level * 0.4
 
     def update_max_event_rew(self):
-        cur_rew = self.get_all_events_reward() / 2
+        cur_rew = self.get_all_events_reward() * 5
         if self.max_event_rew < cur_rew:
+            print("resetting map mem")
             self.init_map_mem()
         self.max_event_rew = max(cur_rew, self.max_event_rew)
         return self.max_event_rew
