@@ -37,31 +37,38 @@ class GoldGymEnv(Env):
     _pokemon1_lv = 0xDA49
     _pokemon1_hp = 0xDA4C
     _pokemon1_max_hp = 0xDA4E
+    _pokemon1_xp = 0xDA32
 
     _pokemon2_lv = 0xDA79
     _pokemon2_hp = 0xDA7C
     _pokemon2_max_hp = 0xDA7E
+    _pokemon2_xp = 0xDA62
 
     _pokemon3_lv = 0xDAA9
     _pokemon3_hp = 0xDAAC
     _pokemon3_max_hp = 0xDAAE
+    _pokemon3_xp = 0xDA92
 
     _pokemon4_lv = 0xDAD9
     _pokemon4_hp = 0xDADC
     _pokemon4_max_hp = 0xDADE
+    _pokemon4_xp = 0xDAC2
 
     _pokemon5_lv = 0xDB09
     _pokemon5_hp = 0xDB0C
     _pokemon5_max_hp = 0xDB0E
+    _pokemon5_xp = 0xDAF2
 
     _pokemon6_lv = 0xDB39
     _pokemon6_hp = 0xDB3C
     _pokemon6_max_hp = 0xDB3E
+    _pokemon6_xp = 0xDB22
 
     _pokemon_lvs = [_pokemon1_lv, _pokemon2_lv, _pokemon3_lv, _pokemon4_lv, _pokemon5_lv, _pokemon6_lv]
     _pokemon_hps = [_pokemon1_hp, _pokemon2_hp, _pokemon3_hp, _pokemon4_hp, _pokemon5_hp, _pokemon6_hp]
     _pokemon_max_hps = [_pokemon1_max_hp, _pokemon2_max_hp, _pokemon3_max_hp, _pokemon4_max_hp, _pokemon5_max_hp,
                         _pokemon6_max_hp]
+    _pokemon_xps = [_pokemon1_xp, _pokemon2_xp, _pokemon3_xp, _pokemon4_xp, _pokemon5_xp, _pokemon6_xp]
 
     _num_items = 0xD5B7
     _num_ball_items = 0xD5FC
@@ -73,9 +80,7 @@ class GoldGymEnv(Env):
 
     _opponent_level = 0xD0FC
 
-    _money1 = 0xD573
-    _money2 = 0xD574
-    _money3 = 0xD575
+    _money = 0xD573
 
     _event_flags = [0xD67C,  # Pokegear
                     0xBD06,  # = Player has Pokédex
@@ -546,6 +551,9 @@ class GoldGymEnv(Env):
         self.max_level_rew = max(self.max_level_rew, scaled)
         return self.max_level_rew
 
+    def get_xp_reward(self):
+        return self.read_xp()
+
     def get_items_reward(self):
         num_items = max(self.read_m(self._num_items), 0)
         num_ball_items = max(self.read_m(self._num_ball_items), 0)
@@ -624,6 +632,7 @@ class GoldGymEnv(Env):
             'event': self.reward_scale * self.update_max_event_rew(),
             # 'party_xp': self.reward_scale*0.1*sum(poke_xps),
             'level': self.reward_scale * self.get_levels_reward(),
+            'xp': self.reward_scale * self.get_xp_reward() * 0.1,
             'items': self.reward_scale * self.get_items_reward(),
             'heal': self.reward_scale * self.total_healing_rew,
             'op_lvl': self.reward_scale * self.update_max_op_level(),
@@ -680,6 +689,12 @@ class GoldGymEnv(Env):
         return 10 * ((num >> 4) & 0x0f) + (num & 0x0f)
 
     def read_money(self):
-        return (100 * 100 * self.read_bcd(self.read_m(self._money1)) +
-                100 * self.read_bcd(self.read_m(self._money2)) +
-                self.read_bcd(self.read_m(self._money3)))
+        return self.read_3bcd(self._money)
+
+    def read_xp(self):
+        return sum([self.read_3bcd(a) for a in self._pokemon_xps])
+
+    def read_3bcd(self, base):
+        return (100 * 100 * self.read_bcd(self.read_m(base)) +
+                100 * self.read_bcd(self.read_m(base + 1)) +
+                self.read_bcd(self.read_m(base + 2)))
