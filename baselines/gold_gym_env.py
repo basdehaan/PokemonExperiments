@@ -79,8 +79,14 @@ class GoldGymEnv(Env):
     _hms = 0xD5B0
 
     _opponent_level = 0xD0FC
+    _opponent_stats = 0xD0FF  # Stats of current opponent. Each value is two-byte big-endian in the following order: current HP, total HP, Attack, Defense, Speed, Sp. Atk., Sp. Def.
 
     _money = 0xD573
+
+    _pokedex_own_from = 0xDBE4
+    _pokedex_own_to = 0xDC03
+    _pokedex_seen_from = 0xDC04
+    _pokedex_seen_to = 0xDC23
 
     _event_flags = [0xD67C,  # Pokegear
                     0xBD06,  # = Player has Pokédex
@@ -158,7 +164,7 @@ class GoldGymEnv(Env):
 
         # Set this in SOME subclasses
         self.metadata = {"render.modes": []}
-        self.reward_range = (0, 15000)
+        self.reward_range = (0, 100)
 
         self.valid_actions = [
             WindowEvent.PRESS_ARROW_DOWN,
@@ -249,12 +255,15 @@ class GoldGymEnv(Env):
             self.model_frame_writer.__enter__()
 
         self.levels_satisfied = False
+        self.levels_satisfied_min = 5
         self.base_explore = 0
         self.max_opponent_level = 0
         self.max_event_rew = 0
         self.max_level_rew = 0
         self.last_health = 1
-        self.total_healing_rew = 0
+        self.last_opp_health = 1
+        self.total_healing_reward = 0
+        self.total_damage_reward = 0
         self.died_count = 0
         self.step_count = 0
         self.progress_reward = self.get_game_state_reward()
@@ -339,11 +348,11 @@ class GoldGymEnv(Env):
             self.pyboy._rendering(False)
         for i in range(self.act_freq):
             # release action, so they are stateless
-            if i == 8:
+            if i == 16:  # was 8, but then the player just turns, but doesn't step
                 if action < 4:
                     # release arrow
                     self.pyboy.send_input(self.release_arrow[action])
-                if action > 3 and action < 6:
+                if 3 < action < 6:
                     # release button 
                     self.pyboy.send_input(self.release_button[action - 4])
                 if self.valid_actions[action] == WindowEvent.PRESS_BUTTON_START:
@@ -376,12 +385,12 @@ class GoldGymEnv(Env):
             'hp': self.read_hp_fraction(),
             expl[0]: expl[1],
             'deaths': self.died_count, 'badge': self.get_badges(),
-            'event': self.progress_reward['event'], 'healr': self.total_healing_rew
+            'event': self.progress_reward['event'], 'healr': self.total_healing_reward
         })
 
     def update_frame_knn_index(self, frame_vec):
 
-        if self.get_levels_sum() >= 22 and not self.levels_satisfied:
+        if self.get_levels_sum() >= self.levels_satisfied_min and not self.levels_satisfied:
             self.levels_satisfied = True
             self.base_explore = self.knn_index.get_current_count()
             self.init_knn()
@@ -395,7 +404,7 @@ class GoldGymEnv(Env):
             # check for nearest frame and add if current 
             labels, distances = self.knn_index.knn_query(frame_vec, k=1)
             if distances[0][0] > self.similar_frame_dist:
-                # print(f"distances[0][0] : {distances[0][0]} similar_frame_dist : {self.similar_frame_dist}")
+                print(f"distances[0][0] : {distances[0][0]} similar_frame_dist : {self.similar_frame_dist}")
                 self.knn_index.add_items(
                     frame_vec, np.array([self.knn_index.get_current_count()])
                 )
@@ -405,7 +414,7 @@ class GoldGymEnv(Env):
         y_pos = self.read_m(self._map_position_y)
         map_n = str(self.read_m(self._map_bank_no)) + "_" + str(self.read_m(self._map_map_no))
         coord_string = f"x:{x_pos} y:{y_pos} m:{map_n}"
-        if self.get_levels_sum() >= 22 and not self.levels_satisfied:
+        if self.get_levels_sum() >= self.levels_satisfied_min and not self.levels_satisfied:
             self.levels_satisfied = True
             self.base_explore = len(self.seen_coords)
             self.seen_coords = {}
@@ -416,13 +425,14 @@ class GoldGymEnv(Env):
     def update_reward(self):
         # compute reward
         old_prog = self.group_rewards()
+        old = self.progress_reward.copy()
         self.progress_reward = self.get_game_state_reward()
         new_prog = self.group_rewards()
         new_total = sum(
             [val for _, val in self.progress_reward.items()])  # sqrt(self.explore_reward * self.progress_reward)
         new_step = new_total - self.total_reward
         if new_step < 0 and self.read_hp_fraction() > 0:
-            # print(f'\n\nreward went down! {self.progress_reward}\n\n')
+            # print(f'\n\nreward went down! instance: {self.instance_id}\n{old}\n{self.progress_reward}\n\n')
             self.save_screenshot('neg_reward')
 
         self.total_reward = new_total
@@ -436,7 +446,7 @@ class GoldGymEnv(Env):
         prog = self.progress_reward
         # these values are only used by memory
         return (prog['level'] * 100 / self.reward_scale,
-                self.read_hp_fraction() * 2000,
+                self.read_hp_fraction() * 100,
                 prog['explore'] * 150 / (self.explore_weight * self.reward_scale))
         # (prog['events'],
         # prog['levels'] + prog['party_xp'],
@@ -538,18 +548,12 @@ class GoldGymEnv(Env):
 
     def get_levels_sum(self):
         poke_levels = [max(self.read_m(a), 0) for a in self._pokemon_lvs]
-        return max(sum(poke_levels), 0)  # subtract starting pokemon level
+        return max(sum(poke_levels), 0)
 
     def get_levels_reward(self):
-        explore_thresh = 22
-        scale_factor = 4
+        # focus other things over leveling when outscaling enemies too much
         level_sum = self.get_levels_sum()
-        if level_sum < explore_thresh:
-            scaled = level_sum
-        else:
-            scaled = (level_sum - explore_thresh) / scale_factor + explore_thresh
-        self.max_level_rew = max(self.max_level_rew, scaled)
-        return self.max_level_rew
+        return min(level_sum, int(self.max_opponent_level * 1.2) + 2)
 
     def get_xp_reward(self):
         return self.read_xp()
@@ -558,13 +562,14 @@ class GoldGymEnv(Env):
         num_items = max(self.read_m(self._num_items), 0)
         num_ball_items = max(self.read_m(self._num_ball_items), 0)
         num_key_items = max(self.read_m(self._num_key_items), 0)
-        return sum([num_items, num_ball_items * 0.1, num_key_items * 2])
+        return sum([num_items * 0.05, num_ball_items * 0.1, num_key_items * 2])
 
     def get_knn_reward(self):
 
         pre_rew = self.explore_weight * 0.005
         post_rew = self.explore_weight * 0.01
-        cur_size = self.knn_index.get_current_count() if self.use_screen_explore else len(self.seen_coords)
+        cur_size = self.knn_index.get_current_count() if self.use_screen_explore else int((len(self.seen_coords) ** 2) /10)
+        # cur_size = self.knn_index.get_current_count() if self.use_screen_explore else sum([sqrt(len(list(_ for k,_ in self.seen_coords.items() if str(k).endswith(f"m:{mapn}")) for mapn in self.seen_maps))])
         base = (self.base_explore if self.levels_satisfied else cur_size) * pre_rew
         post = (cur_size if self.levels_satisfied else 0) * post_rew
         return base + post
@@ -575,8 +580,14 @@ class GoldGymEnv(Env):
     def get_hms(self):
         return self.bit_count(self.read_m(self._hms))
 
+    def get_seen_count(self):
+        return self.read_pokedex_count(self._pokedex_seen_from, self._pokedex_seen_to)
+
+    def get_caught_count(self):
+        return self.read_pokedex_count(self._pokedex_own_from, self._pokedex_own_to)
+
     def get_maps_explored(self):
-        return len(self.seen_maps)
+        return len(self.seen_maps) ** 2
 
     def read_party(self):
         return [self.read_m(addr) for addr in self._party_pokemon]
@@ -586,62 +597,46 @@ class GoldGymEnv(Env):
         if cur_health > self.last_health:
             if self.last_health > 0:
                 heal_amount = cur_health - self.last_health
-                if heal_amount > 0.5:
+                if heal_amount > 0.2: # exclude levelups
                     print(f'healed: {heal_amount}')
                     self.save_screenshot('healing')
-                self.total_healing_rew += heal_amount * 4
+                    self.total_healing_reward += heal_amount
             else:
                 self.died_count += 1
 
+    def get_damage_reward(self):
+        curr_opp_health = self.read_opp_hp_fraction()
+        if curr_opp_health <= self.last_opp_health:
+            rew = self.last_opp_health - curr_opp_health
+            self.last_opp_health = curr_opp_health
+            self.total_damage_reward += rew
+        else:
+            self.last_opp_health = curr_opp_health
+        return self.total_damage_reward
+
     def get_all_events_reward(self):
-        # adds up all event flags, exclude museum ticket
-        # [print(hex(i)) for i in range(self._event_flags_start, self._event_flags_end) if self.bit_count(self.read_m(i)) > 0]
-        base_event_flags = 90
-        return max(
-            sum([self.bit_count(self.read_m(i)) for i in self._event_flags])
-            - base_event_flags,
-            0,
-        )
+        # flags = [hex(i) for i in self._event_flags]
+        # values = [self.bit_count(self.read_bit(i, 1)) for i in self._event_flags]
+        # print("\n", list(zip(flags, values)), sum([self.bit_count(self.read_bit(i, 1)) for i in self._event_flags]))
+        return max(sum([self.bit_count(self.read_bit(i, 1)) for i in self._event_flags]), 0)
 
     def get_game_state_reward(self, print_stats=False):
         # addresses from https://datacrystal.romhacking.net/wiki/Pok%C3%A9mon_Red/Blue:RAM_map
         # https://github.com/pret/pokered/blob/91dc3c9f9c8fd529bb6e8307b58b96efa0bec67e/constants/event_constants.asm
-        '''
-        num_poke = self.read_m(0xD163)
-        poke_xps = [self.read_triple(a) for a in [0xD179, 0xD1A5, 0xD1D1, 0xD1FD, 0xD229, 0xD255]]
-        #money = self.read_money() - 975 # subtract starting money
-        seen_poke_count = sum([self.bit_count(self.read_m(i)) for i in range(0xD30A, 0xD31D)])
-        all_events_score = sum([self.bit_count(self.read_m(i)) for i in range(0xD747, 0xD886)])
-        oak_parcel = self.read_bit(0xD74E, 1) 
-        oak_pokedex = self.read_bit(0xD74B, 5)
-        opponent_level = self.read_m(0xCFF3)
-        self.max_opponent_level = max(self.max_opponent_level, opponent_level)
-        enemy_poke_count = self.read_m(0xD89C)
-        self.max_opponent_poke = max(self.max_opponent_poke, enemy_poke_count)
-        
-        if print_stats:
-            print(f'num_poke : {num_poke}')
-            print(f'poke_levels : {poke_levels}')
-            print(f'poke_xps : {poke_xps}')
-            #print(f'money: {money}')
-            print(f'seen_poke_count : {seen_poke_count}')
-            print(f'oak_parcel: {oak_parcel} oak_pokedex: {oak_pokedex} all_events_score: {all_events_score}')
-        '''
-
         state_scores = {
-            'event': self.reward_scale * self.update_max_event_rew(),
-            # 'party_xp': self.reward_scale*0.1*sum(poke_xps),
+            'event': self.reward_scale * (self.update_max_event_reward() ** 3) * 0.0001,
             'level': self.reward_scale * self.get_levels_reward(),
-            'xp': self.reward_scale * self.get_xp_reward() * 0.1,
+            # 'xp': self.reward_scale * self.get_xp_reward() * 0.1,
             'items': self.reward_scale * self.get_items_reward(),
-            'heal': self.reward_scale * self.total_healing_rew,
+            'heal': self.reward_scale * self.total_healing_reward,
             'op_lvl': self.reward_scale * self.update_max_op_level(),
+            # 'op_dmg': self.reward_scale * self.get_damage_reward(),
             'dead': self.reward_scale * -0.1 * self.died_count,
             'badge': self.reward_scale * self.get_badges() * 5,
             'hms': self.reward_scale * self.get_hms() * 5,
-            # 'op_poke': self.reward_scale*self.max_opponent_poke * 800,
             # 'money': self.reward_scale* money * 3,
-            # 'seen_poke': self.reward_scale * seen_poke_count * 400,
+            'seen_count': self.reward_scale * self.get_seen_count() * 0.01,
+            'caught_count': self.reward_scale * self.get_caught_count() * 0.1,
             'explore': self.reward_scale * self.get_knn_reward(),
             'map_explore': self.reward_scale * self.get_maps_explored()
         }
@@ -660,20 +655,27 @@ class GoldGymEnv(Env):
         self.max_opponent_level = max(self.max_opponent_level, opponent_level)
         return self.max_opponent_level * 0.4
 
-    def update_max_event_rew(self):
-        cur_rew = self.get_all_events_reward() * 5
-        if self.max_event_rew < cur_rew:
-            print("resetting map mem")
-            self.init_map_mem()
+    def update_max_event_reward(self):
+        cur_rew = self.get_all_events_reward()
+        # if self.max_event_rew < cur_rew:
+        #     # print(f"hit event: {cur_rew}. resetting map mem")
+        #     self.init_map_mem()
         self.max_event_rew = max(cur_rew, self.max_event_rew)
         return self.max_event_rew
 
     def read_hp_fraction(self):
-        hp_sum = sum([self.read_hp(add) for add in self._pokemon_hps])
-        max_hp_sum = sum([self.read_hp(add) for add in self._pokemon_max_hps])
+        hp_sum = sum([self.read_hp(hp) for hp in self._pokemon_hps])
+        max_hp_sum = sum([self.read_hp(hp) for hp in self._pokemon_max_hps])
         if hp_sum == 0 or max_hp_sum == 0:
             return 0
         return hp_sum / max_hp_sum
+
+    def read_opp_hp_fraction(self):
+        hp = self.read_hp(self._opponent_stats)
+        max_hp = self.read_hp(self._opponent_stats + 2)
+        if max_hp == 0:
+            return 1
+        return hp / max_hp
 
     def read_hp(self, start):
         return 256 * self.read_m(start) + self.read_m(start + 1)
@@ -698,3 +700,6 @@ class GoldGymEnv(Env):
         return (100 * 100 * self.read_bcd(self.read_m(base)) +
                 100 * self.read_bcd(self.read_m(base + 1)) +
                 self.read_bcd(self.read_m(base + 2)))
+
+    def read_pokedex_count(self, start, end):
+        return sum([self.bit_count(self.read_bit(i, 1)) for i in range(start, end + 1)])
