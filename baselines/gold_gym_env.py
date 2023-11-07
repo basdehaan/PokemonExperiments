@@ -504,7 +504,7 @@ class GoldGymEnv(Env):
 
     def save_and_print_info(self, done, obs_memory):
         if self.print_rewards:
-            prog_string = f'seed:{self.seed} step: {self.step_count:6d}'
+            prog_string = f'step: {self.step_count:6d} seed:{self.seed} '
             for key, val in self.progress_reward.items():
                 prog_string += f' {key}: {val:5.2f}'
             prog_string += f' sum: {self.total_reward:5.2f}'
@@ -599,10 +599,10 @@ class GoldGymEnv(Env):
         if cur_health > self.last_health:
             if self.last_health > 0:
                 heal_amount = cur_health - self.last_health
-                if heal_amount > 0.2:  # exclude levelups
+                if heal_amount > 0.5:  # exclude levelups
                     print(f'healed: {heal_amount}')
                     self.save_screenshot('healing')
-                    self.total_healing_reward += heal_amount
+                self.total_healing_reward += heal_amount
             else:
                 self.died_count += 1
 
