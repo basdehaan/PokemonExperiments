@@ -222,10 +222,11 @@ class GoldGymEnv(Env):
         if not config['headless']:
             self.pyboy.set_emulation_speed(5)
 
-        self.reset()
+        # self.reset()
 
     def reset(self, seed=None):
-        self.seed = seed
+        if seed is not None:
+            self.seed = seed
         # restart game, skipping credits
         if self.init_state:
             with open(self.init_state, "rb") as f:
@@ -503,7 +504,7 @@ class GoldGymEnv(Env):
 
     def save_and_print_info(self, done, obs_memory):
         if self.print_rewards:
-            prog_string = f'step: {self.step_count:6d}'
+            prog_string = f'seed:{self.seed} step: {self.step_count:6d}'
             for key, val in self.progress_reward.items():
                 prog_string += f' {key}: {val:5.2f}'
             prog_string += f' sum: {self.total_reward:5.2f}'
@@ -553,7 +554,7 @@ class GoldGymEnv(Env):
     def get_levels_reward(self):
         # focus other things over leveling when outscaling enemies too much
         level_sum = self.get_levels_sum()
-        return min(level_sum, int(self.max_opponent_level * 1.2) + 2)
+        return min(level_sum, int(self.max_opponent_level * 6))
 
     def get_xp_reward(self):
         return self.read_xp()
@@ -568,7 +569,8 @@ class GoldGymEnv(Env):
 
         pre_rew = self.explore_weight * 0.005
         post_rew = self.explore_weight * 0.01
-        cur_size = self.knn_index.get_current_count() if self.use_screen_explore else int((len(self.seen_coords) ** 2) /10)
+        cur_size = self.knn_index.get_current_count() if self.use_screen_explore else int(
+            (len(self.seen_coords) ** 2) / 10)
         # cur_size = self.knn_index.get_current_count() if self.use_screen_explore else sum([sqrt(len(list(_ for k,_ in self.seen_coords.items() if str(k).endswith(f"m:{mapn}")) for mapn in self.seen_maps))])
         base = (self.base_explore if self.levels_satisfied else cur_size) * pre_rew
         post = (cur_size if self.levels_satisfied else 0) * post_rew
@@ -597,7 +599,7 @@ class GoldGymEnv(Env):
         if cur_health > self.last_health:
             if self.last_health > 0:
                 heal_amount = cur_health - self.last_health
-                if heal_amount > 0.2: # exclude levelups
+                if heal_amount > 0.2:  # exclude levelups
                     print(f'healed: {heal_amount}')
                     self.save_screenshot('healing')
                     self.total_healing_reward += heal_amount
@@ -606,12 +608,13 @@ class GoldGymEnv(Env):
 
     def get_damage_reward(self):
         curr_opp_health = self.read_opp_hp_fraction()
-        if curr_opp_health <= self.last_opp_health:
-            rew = self.last_opp_health - curr_opp_health
-            self.last_opp_health = curr_opp_health
-            self.total_damage_reward += rew
-        else:
-            self.last_opp_health = curr_opp_health
+        if self.get_levels_sum() <= self.get_levels_reward():
+            if curr_opp_health <= self.last_opp_health:
+                rew = self.last_opp_health - curr_opp_health
+                self.last_opp_health = curr_opp_health
+                self.total_damage_reward += rew
+            else:
+                self.last_opp_health = curr_opp_health
         return self.total_damage_reward
 
     def get_all_events_reward(self):
@@ -630,7 +633,7 @@ class GoldGymEnv(Env):
             'items': self.reward_scale * self.get_items_reward(),
             'heal': self.reward_scale * self.total_healing_reward,
             'op_lvl': self.reward_scale * self.update_max_op_level(),
-            # 'op_dmg': self.reward_scale * self.get_damage_reward(),
+            'op_dmg': self.reward_scale * self.get_damage_reward(),
             'dead': self.reward_scale * -0.1 * self.died_count,
             'badge': self.reward_scale * self.get_badges() * 5,
             'hms': self.reward_scale * self.get_hms() * 5,

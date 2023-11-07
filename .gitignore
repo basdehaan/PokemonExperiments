@@ -12,3 +12,7 @@ session_*
 .env
 PokemonRed.gb.state
 .idea/*
+baselines/_session_start/agent_stats_*
+baselines/_session_start/all_runs_*
+baselines/_session_start/curframe_*
+baselines/_session_start/screenshots/*
