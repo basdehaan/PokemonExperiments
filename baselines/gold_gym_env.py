@@ -164,7 +164,7 @@ class GoldGymEnv(Env):
 
         # Set this in SOME subclasses
         self.metadata = {"render.modes": []}
-        self.reward_range = (0, 100)
+        self.reward_range = (0, 5000)
 
         self.valid_actions = [
             WindowEvent.PRESS_ARROW_DOWN,
@@ -257,7 +257,6 @@ class GoldGymEnv(Env):
 
         self.levels_satisfied = False
         self.levels_satisfied_min = 5
-        self.base_explore = 0
         self.max_opponent_level = 0
         self.max_event_rew = 0
         self.max_level_rew = 0
@@ -281,7 +280,9 @@ class GoldGymEnv(Env):
 
     def init_map_mem(self):
         self.seen_coords = {}
+        self.seen_map_coords = {}
         self.seen_maps = set([])
+        self.map_min_size = 30
 
     def render(self, reduce_res=True, add_memory=True, update_mem=True):
         game_pixels_render = self.screen.screen_ndarray()  # (144, 160, 3)
@@ -393,7 +394,6 @@ class GoldGymEnv(Env):
 
         if self.get_levels_sum() >= self.levels_satisfied_min and not self.levels_satisfied:
             self.levels_satisfied = True
-            self.base_explore = self.knn_index.get_current_count()
             self.init_knn()
 
         if self.knn_index.get_current_count() == 0:
@@ -417,10 +417,12 @@ class GoldGymEnv(Env):
         coord_string = f"x:{x_pos} y:{y_pos} m:{map_n}"
         if self.get_levels_sum() >= self.levels_satisfied_min and not self.levels_satisfied:
             self.levels_satisfied = True
-            self.base_explore = len(self.seen_coords)
             self.seen_coords = {}
 
         self.seen_coords[coord_string] = self.step_count
+        if map_n not in list(self.seen_map_coords.keys()):
+            self.seen_map_coords[map_n] = {}
+        self.seen_map_coords[map_n][coord_string] = self.step_count
         self.seen_maps.add(map_n)
 
     def update_reward(self):
@@ -565,16 +567,12 @@ class GoldGymEnv(Env):
         num_key_items = max(self.read_m(self._num_key_items), 0)
         return sum([num_items * 0.05, num_ball_items * 0.1, num_key_items * 2])
 
-    def get_knn_reward(self):
-
-        pre_rew = self.explore_weight * 0.005
-        post_rew = self.explore_weight * 0.01
-        cur_size = self.knn_index.get_current_count() if self.use_screen_explore else int(
-            (len(self.seen_coords) ** 2) / 10)
-        # cur_size = self.knn_index.get_current_count() if self.use_screen_explore else sum([sqrt(len(list(_ for k,_ in self.seen_coords.items() if str(k).endswith(f"m:{mapn}")) for mapn in self.seen_maps))])
-        base = (self.base_explore if self.levels_satisfied else cur_size) * pre_rew
-        post = (cur_size if self.levels_satisfied else 0) * post_rew
-        return base + post
+    def get_explore_reward(self):
+        weight = self.explore_weight * 0.01
+        cur_size = self.knn_index.get_current_count() if self.use_screen_explore \
+            else sum([i for i in [len(self.seen_map_coords[m]) for m in self.seen_map_coords.keys()] if i > self.map_min_size])
+        post = (cur_size if self.levels_satisfied else cur_size / 10) * weight
+        return post
 
     def get_badges(self):
         return self.bit_count(self.read_m(self._badges))
@@ -640,7 +638,7 @@ class GoldGymEnv(Env):
             # 'money': self.reward_scale* money * 3,
             'seen_count': self.reward_scale * self.get_seen_count() * 0.01,
             'caught_count': self.reward_scale * self.get_caught_count() * 0.1,
-            'explore': self.reward_scale * self.get_knn_reward(),
+            'explore': self.reward_scale * self.get_explore_reward(),
             'map_explore': self.reward_scale * self.get_maps_explored()
         }
 
