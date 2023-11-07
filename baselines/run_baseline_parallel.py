@@ -67,19 +67,21 @@ if __name__ == '__main__':
         'action_freq': 24, 'init_state': '../PokemonGold_chose_totodile.gbc.state', 'max_steps': ep_length,
         'print_rewards': True, 'save_video': False, 'fast_video': True, 'session_path': sess_path,
         'gb_path': '../PokemonGold.gbc', 'debug': False, 'sim_frame_dist': 2_000_000.0,
-        'use_screen_explore': False, 'extra_buttons': True, 'explore_weight': 3
+        'use_screen_explore': False, 'extra_buttons': True, 'explore_weight': 2
     }
     env_config_1 = env_config.copy()
     env_config_1['headless'] = False
 
     num_cpu = 12  # 64 #46  # Also sets the number of episodes per training iteration
-    env = SubprocVecEnv([make_env(i, env_config_1 if i < 1 else env_config, seed=8618) for i in range(num_cpu)])
+    env = SubprocVecEnv([make_env(i, env_config_1 if i < 1 else env_config, seed=2305) for i in range(num_cpu)])
 
     checkpoint_callback = CheckpointCallback(save_freq=ep_length, save_path=str(sess_path), name_prefix='poke')
 
     learn_steps = 100
     files = [f for f in os.listdir(f'../baselines/_session_start') if 'poke' in f]
-    files = sorted(files, key=lambda x: int(str(x).replace('poke_', '').replace('_steps.zip','')), reverse=True)
+    files = sorted(files,
+                   key=lambda x: int(str(x).replace('poke_', '').replace('_steps.zip', '')),
+                   reverse=True)
     print(files)
     file_name = f'_session_start/{files[0]}'
     file_name = file_name.replace(".zip", "")
