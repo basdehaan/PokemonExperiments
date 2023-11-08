@@ -16,4 +16,4 @@ def list_sessions():
 
 if __name__ == '__main__':
     list_sessions()
-    # move_sessions()
+    move_sessions()

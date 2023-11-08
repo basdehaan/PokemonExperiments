@@ -569,8 +569,7 @@ class GoldGymEnv(Env):
 
         pre_rew = self.explore_weight * 0.005
         post_rew = self.explore_weight * 0.01
-        cur_size = self.knn_index.get_current_count() if self.use_screen_explore else int(
-            (len(self.seen_coords) ** 2) / 10)
+        cur_size = self.knn_index.get_current_count() if self.use_screen_explore else len(self.seen_coords)
         # cur_size = self.knn_index.get_current_count() if self.use_screen_explore else sum([sqrt(len(list(_ for k,_ in self.seen_coords.items() if str(k).endswith(f"m:{mapn}")) for mapn in self.seen_maps))])
         base = (self.base_explore if self.levels_satisfied else cur_size) * pre_rew
         post = (cur_size if self.levels_satisfied else 0) * post_rew
@@ -589,7 +588,7 @@ class GoldGymEnv(Env):
         return self.read_pokedex_count(self._pokedex_own_from, self._pokedex_own_to)
 
     def get_maps_explored(self):
-        return len(self.seen_maps) ** 2
+        return len(self.seen_maps)
 
     def read_party(self):
         return [self.read_m(addr) for addr in self._party_pokemon]
@@ -641,7 +640,7 @@ class GoldGymEnv(Env):
             'seen_count': self.reward_scale * self.get_seen_count() * 0.01,
             'caught_count': self.reward_scale * self.get_caught_count() * 0.1,
             'explore': self.reward_scale * self.get_knn_reward(),
-            'map_explore': self.reward_scale * self.get_maps_explored()
+            'map_explore': self.reward_scale * ((self.get_maps_explored() ** 2) / 10)
         }
 
         return state_scores
