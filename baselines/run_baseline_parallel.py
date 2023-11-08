@@ -44,8 +44,8 @@ def make_env(rank, env_conf, seed=0):
     :param seed: (int) the initial seed for RNG
     :param rank: (int) index of the subprocess
     """
-    # if rank != 0:
-    #     seed = random.randint(0, 10000)
+    if rank != 0:
+        seed = random.randint(0, 10000)
 
     def _init():
         env = GoldGymEnv(env_conf)

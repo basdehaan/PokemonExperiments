@@ -9,5 +9,11 @@ def move_sessions():
         shutil.move(file, f'../baselines/_session_start/' + file[len("../baselines/session_12345678/"):])
 
 
+def list_sessions():
+    for file in glob.glob(f'../baselines/session_*/poke_*_steps.zip'):
+        print(file)
+
+
 if __name__ == '__main__':
-    move_sessions()
+    list_sessions()
+    # move_sessions()
