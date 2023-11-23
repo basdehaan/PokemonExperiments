@@ -13,29 +13,6 @@ from stable_baselines3.common.utils import set_random_seed
 from stable_baselines3.common.callbacks import CheckpointCallback
 
 
-def linear_schedule(minimum_value: float) -> Callable[[float], float]:
-    """
-    Linear learning rate schedule.
-
-    :param minimum_value: Initial learning rate.
-    :return: schedule that computes
-      current learning rate depending on remaining progress
-    """
-
-    def func(progress_remaining: float) -> float:
-        """
-        Progress will decrease from 1 (beginning) to 0.
-
-        :param progress_remaining:
-        :return: current learning rate
-        """
-        lr = max(progress_remaining * minimum_value * 10, minimum_value)
-        print(lr)
-        return lr
-
-    return func
-
-
 def make_env(rank, env_conf, seed=0):
     """
     Utility function for multiprocessed env.
@@ -70,14 +47,14 @@ if __name__ == '__main__':
         'use_screen_explore': False, 'extra_buttons': True, 'explore_weight': 1
     }
     env_config_1 = env_config.copy()
-    # env_config_1['headless'] = False
+    env_config_1['headless'] = False
 
-    num_cpu = 48  # 64 #46  # Also sets the number of episodes per training iteration
+    num_cpu = 1  # 64 #46  # Also sets the number of episodes per training iteration
     env = SubprocVecEnv([make_env(i, env_config_1 if i < 1 else env_config, seed=672) for i in range(num_cpu)])
 
     checkpoint_callback = CheckpointCallback(save_freq=ep_length, save_path=str(sess_path), name_prefix='poke')
 
-    learn_steps = 1000
+    learn_steps = 10000
     files = [f for f in os.listdir(f'../baselines/_session_start') if 'poke' in f]
     files = sorted(files,
                    key=lambda x: int(str(x).replace('poke_', '').replace('_steps.zip', '')),
@@ -97,8 +74,7 @@ if __name__ == '__main__':
         model.rollout_buffer.reset()
     else:
         print('invalid checkpoint', file_name)
-        model = PPO('CnnPolicy', env, verbose=1, n_steps=ep_length, batch_size=64, n_epochs=1, gamma=0.999,
-                    learning_rate=linear_schedule(3e-4))
+        model = PPO('CnnPolicy', env, verbose=1, n_steps=ep_length, batch_size=64, n_epochs=1, gamma=0.999)
 
     for i in range(learn_steps):
         model.learn(total_timesteps=ep_length * num_cpu, callback=checkpoint_callback, reset_num_timesteps=False)
