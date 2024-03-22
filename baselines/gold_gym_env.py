@@ -1,3 +1,4 @@
+import random
 import sys
 import uuid
 import os
@@ -220,12 +221,16 @@ class GoldGymEnv(Env):
         self.screen = self.pyboy.botsupport_manager().screen()
 
         if not config['headless']:
-            self.pyboy.set_emulation_speed(5)
+            self.pyboy.set_emulation_speed(100)
 
         # self.reset()
 
     def reset(self, seed=None):
         if seed is not None:
+            self.seed = seed
+        else:
+            seed = random.randint(0, 10000)
+            # print("reshuffling seed", seed)
             self.seed = seed
         # restart game, skipping credits
         if self.init_state:
@@ -554,7 +559,7 @@ class GoldGymEnv(Env):
     def get_levels_reward(self):
         # focus other things over leveling when outscaling enemies too much
         level_sum = self.get_levels_sum()
-        return min(level_sum, int(self.max_opponent_level * 6))
+        return min(level_sum, int(self.max_opponent_level * 6) + 5)
 
     def get_xp_reward(self):
         return self.read_xp()
@@ -633,14 +638,14 @@ class GoldGymEnv(Env):
             'heal': self.reward_scale * self.total_healing_reward,
             'op_lvl': self.reward_scale * self.update_max_op_level(),
             'op_dmg': self.reward_scale * self.get_damage_reward(),
-            'dead': self.reward_scale * -0.1 * self.died_count,
+            'dead': self.reward_scale * -0.0 * self.died_count,
             'badge': self.reward_scale * self.get_badges() * 5,
             'hms': self.reward_scale * self.get_hms() * 5,
             # 'money': self.reward_scale* money * 3,
             'seen_count': self.reward_scale * self.get_seen_count() * 0.01,
             'caught_count': self.reward_scale * self.get_caught_count() * 0.1,
             'explore': self.reward_scale * self.get_knn_reward(),
-            'map_explore': self.reward_scale * ((self.get_maps_explored() ** 2) / 10)
+            'map_explore': self.reward_scale * self.explore_weight * ((self.get_maps_explored() ** 2) / 10)
         }
 
         return state_scores
