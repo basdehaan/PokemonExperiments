@@ -144,7 +144,9 @@ class GoldGymEnv(Env):
         self.vec_dim = 4320  # 1000
         self.headless = config['headless']
         self.num_elements = 20000  # max
-        self.init_state = config['init_state']
+        self.init_state = None if 'init_state' not in config else config['init_state']
+        self.load_once = False if 'load_once' not in config else config['load_once']
+        self.loaded = False
         self.act_freq = config['action_freq']
         self.max_steps = config['max_steps']
         self.early_stopping = config['early_stop']
@@ -165,7 +167,7 @@ class GoldGymEnv(Env):
 
         # Set this in SOME subclasses
         self.metadata = {"render.modes": []}
-        self.reward_range = (0, 100)
+        self.reward_range = (-10, 100)
 
         self.valid_actions = [
             WindowEvent.PRESS_ARROW_DOWN,
@@ -232,14 +234,18 @@ class GoldGymEnv(Env):
             seed = random.randint(0, 10000)
             # print("reshuffling seed", seed)
             self.seed = seed
+
         # restart game, skipping credits
         if self.init_state:
             with open(self.init_state, "rb") as f:
                 self.pyboy.load_state(f)
+            if self.load_once and not self.loaded:
+                self.init_state = None
 
-        if self.use_screen_explore:
-            self.init_knn()
-        self.init_map_mem()
+        if not self.loaded:
+            if self.use_screen_explore:
+                self.init_knn()
+            self.init_map_mem()
 
         self.recent_memory = np.zeros((self.output_shape[1] * self.memory_height, 3), dtype=np.uint8)
 
@@ -275,6 +281,7 @@ class GoldGymEnv(Env):
         self.progress_reward = self.get_game_state_reward()
         self.total_reward = sum([val for _, val in self.progress_reward.items()])
         self.reset_count += 1
+        self.loaded = True
         return self.render(), {}
 
     def init_knn(self):
@@ -410,7 +417,7 @@ class GoldGymEnv(Env):
             # check for nearest frame and add if current 
             labels, distances = self.knn_index.knn_query(frame_vec, k=1)
             if distances[0][0] > self.similar_frame_dist:
-                print(f"distances[0][0] : {distances[0][0]} similar_frame_dist : {self.similar_frame_dist}")
+                # print(f"distances[0][0] : {distances[0][0]} similar_frame_dist : {self.similar_frame_dist}")
                 self.knn_index.add_items(
                     frame_vec, np.array([self.knn_index.get_current_count()])
                 )
@@ -437,9 +444,9 @@ class GoldGymEnv(Env):
         new_total = sum(
             [val for _, val in self.progress_reward.items()])  # sqrt(self.explore_reward * self.progress_reward)
         new_step = new_total - self.total_reward
-        if new_step < 0 and self.read_hp_fraction() > 0:
-            # print(f'\n\nreward went down! instance: {self.instance_id}\n{old}\n{self.progress_reward}\n\n')
-            self.save_screenshot('neg_reward')
+        # if new_step < 0 and self.read_hp_fraction() > 0:
+        # print(f'\n\nreward went down! instance: {self.instance_id}\n{old}\n{self.progress_reward}\n\n')
+        # self.save_screenshot('neg_reward')
 
         self.total_reward = new_total
         return (new_step,
@@ -515,24 +522,24 @@ class GoldGymEnv(Env):
             prog_string += f' sum: {self.total_reward:5.2f}'
             print(f'\r{prog_string}', end='', flush=True)
 
-        if self.step_count % 50 == 0:
-            plt.imsave(
-                self.s_path / Path(f'curframe_{self.instance_id}.jpeg'),
-                self.render(reduce_res=False))
+        # if self.step_count % 50 == 0:
+        #     plt.imsave(
+        #         self.s_path / Path(f'curframe_{self.instance_id}.jpeg'),
+        #         self.render(reduce_res=False))
 
         if self.print_rewards and done:
             print('', flush=True)
             if self.save_final_state:
                 fs_path = self.s_path / Path('final_states')
                 fs_path.mkdir(exist_ok=True)
-                plt.imsave(
-                    fs_path / Path(f'frame_r{self.total_reward:.4f}_{self.reset_count}_small.jpeg'),
-                    obs_memory)
-                plt.imsave(
-                    fs_path / Path(f'frame_r{self.total_reward:.4f}_{self.reset_count}_full.jpeg'),
-                    self.render(reduce_res=False))
-                # with open(str(self.s_path) + f"/final_states/r{self.total_reward:.4f}_{self.reset_count}.state", "bw") as f:
-                #     self.pyboy.save_state(f)
+                # plt.imsave(
+                #     fs_path / Path(f'frame_r{self.total_reward:.4f}_{self.reset_count}_small.jpeg'),
+                #     obs_memory)
+                # plt.imsave(
+                #     fs_path / Path(f'frame_r{self.total_reward:.4f}_{self.reset_count}_full.jpeg'),
+                #     self.render(reduce_res=False))
+                with open(str(self.s_path) + f"/final_states/r{self.total_reward:.4f}_{self.reset_count}.state", "bw") as f:
+                    self.pyboy.save_state(f)
 
         if self.save_video and done:
             self.full_frame_writer.close()
@@ -570,12 +577,13 @@ class GoldGymEnv(Env):
         num_key_items = max(self.read_m(self._num_key_items), 0)
         return sum([num_items * 0.05, num_ball_items * 0.1, num_key_items * 2])
 
-    def get_knn_reward(self):
+    def get_explore_reward(self):
+        if not self.use_screen_explore:
+            return len(self.seen_coords) * 0.1
 
-        pre_rew = self.explore_weight * 0.005
-        post_rew = self.explore_weight * 0.01
-        cur_size = self.knn_index.get_current_count() if self.use_screen_explore else len(self.seen_coords)
-        # cur_size = self.knn_index.get_current_count() if self.use_screen_explore else sum([sqrt(len(list(_ for k,_ in self.seen_coords.items() if str(k).endswith(f"m:{mapn}")) for mapn in self.seen_maps))])
+        pre_rew = 0.005
+        post_rew = 0.01
+        cur_size = self.knn_index.get_current_count()
         base = (self.base_explore if self.levels_satisfied else cur_size) * pre_rew
         post = (cur_size if self.levels_satisfied else 0) * post_rew
         return base + post
@@ -631,21 +639,22 @@ class GoldGymEnv(Env):
         # addresses from https://datacrystal.romhacking.net/wiki/Pok%C3%A9mon_Red/Blue:RAM_map
         # https://github.com/pret/pokered/blob/91dc3c9f9c8fd529bb6e8307b58b96efa0bec67e/constants/event_constants.asm
         state_scores = {
-            'event': self.reward_scale * (self.update_max_event_reward() ** 3) * 0.0001,
+            'event': self.reward_scale * (self.update_max_event_reward() ** 2) * 0.01,
             'level': self.reward_scale * self.get_levels_reward(),
             # 'xp': self.reward_scale * self.get_xp_reward() * 0.1,
             'items': self.reward_scale * self.get_items_reward(),
             'heal': self.reward_scale * self.total_healing_reward,
             'op_lvl': self.reward_scale * self.update_max_op_level(),
             'op_dmg': self.reward_scale * self.get_damage_reward(),
-            'dead': self.reward_scale * -0.0 * self.died_count,
+            'dead': self.reward_scale * -1.0 * self.died_count,
             'badge': self.reward_scale * self.get_badges() * 5,
             'hms': self.reward_scale * self.get_hms() * 5,
             # 'money': self.reward_scale* money * 3,
             'seen_count': self.reward_scale * self.get_seen_count() * 0.01,
             'caught_count': self.reward_scale * self.get_caught_count() * 0.1,
-            'explore': self.reward_scale * self.get_knn_reward(),
-            'map_explore': self.reward_scale * self.explore_weight * ((self.get_maps_explored() ** 2) / 10)
+            'explore': self.reward_scale * self.explore_weight * self.get_explore_reward(),
+            'map_explore': self.reward_scale * self.get_maps_explored(),
+            'neg_steps': self.step_count * -0.001
         }
 
         return state_scores
@@ -664,8 +673,8 @@ class GoldGymEnv(Env):
 
     def update_max_event_reward(self):
         cur_rew = self.get_all_events_reward()
-        # if self.max_event_rew < cur_rew:
-        #     # print(f"hit event: {cur_rew}. resetting map mem")
+        # if cur_rew - self.max_event_rew > 10:
+        #     print(f"\nhit event: {cur_rew}. resetting map mem")
         #     self.init_map_mem()
         self.max_event_rew = max(cur_rew, self.max_event_rew)
         return self.max_event_rew

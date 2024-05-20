@@ -16,3 +16,6 @@ baselines/_session_start/agent_stats_*
 baselines/_session_start/all_runs_*
 baselines/_session_start/curframe_*
 baselines/_session_start/screenshots/*
+baselines/_session_neg_base_reward/all_runs_*
+baselines/_session_neg_base_reward/curframe_*
+baselines/_session_neg_base_reward/screenshots/*
