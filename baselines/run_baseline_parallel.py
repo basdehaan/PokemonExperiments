@@ -45,12 +45,11 @@ if __name__ == '__main__':
     except:
         pass
     print("loading init state", init_state)
-    # TODO: find best saved state and use that
     print(sess_path)
 
     env_config = {
         'headless': True, 'save_final_state': True, 'early_stop': False,
-        'action_freq': 24, 'load_once': True, 'random_reload': 0.05,
+        'action_freq': 24, 'load_once': True, 'random_reload': 0.01,
         'init_state': init_state,
         'max_steps': ep_length,
         'print_rewards': True, 'save_video': False, 'fast_video': True, 'session_path': sess_path,
@@ -60,12 +59,9 @@ if __name__ == '__main__':
 
     def get_env_config_for_i(i):
         _env = env_config.copy()
-        # if i < 2:
-        #     # 2 visible windows
-        #     _env['headless'] = False
-        # if i % 2 == 0:
-        #     # reload half the windows every iteration
-        #     _env['load_once'] = False
+        if i < 1:
+            # n visible windows
+            _env['headless'] = False
         return _env
 
     num_cpu = 24  # 64 #46  # Also sets the number of episodes per training iteration
@@ -84,7 +80,7 @@ if __name__ == '__main__':
                    key=lambda x: int(str(x).replace('poke_', '').replace('_steps.zip', '')),
                    reverse=True)
     print(files)
-    agent = PPO('CnnPolicy', env, verbose=1, n_steps=ep_length, batch_size=64, n_epochs=10,
+    agent = PPO('CnnPolicy', env, verbose=1, n_steps=ep_length, batch_size=32, n_epochs=10,
                 gamma=0.99,
                 learning_rate=0.01)
     if len(files) > 0:

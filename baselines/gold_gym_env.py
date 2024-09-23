@@ -1,13 +1,11 @@
 import random
 import sys
 import uuid
-import os
-from math import floor, sqrt
+from math import floor
 import json
 from pathlib import Path
 
 import numpy as np
-import pyboy.botsupport.screen
 from einops import rearrange
 import matplotlib.pyplot as plt
 from skimage.transform import resize
@@ -237,26 +235,19 @@ class GoldGymEnv(Env):
             self.seed = seed
 
         # restart game, skipping credits
-        reload = False
         if self.init_state:
             if not self.loaded:
                 print("initial load")
                 with open(self.init_state, "rb") as f:
                     self.pyboy.load_state(f)
-                    reload = True
             elif self.loaded and not self.load_once:
                 print("not load_once load")
                 with open(self.init_state, "rb") as f:
                     self.pyboy.load_state(f)
-                    reload = True
             elif random.random() < self.random_reload:
                 print("-- random reload")
                 with open(self.init_state, "rb") as f:
                     self.pyboy.load_state(f)
-                    reload = True
-
-        if not reload:
-            return self.render(), {}
 
         if not self.loaded:
             if self.use_screen_explore:
@@ -651,12 +642,12 @@ class GoldGymEnv(Env):
         # print("\n", list(zip(flags, values)), sum([self.bit_count(self.read_bit(i, 1)) for i in self._event_flags]))
         return max(sum([self.bit_count(self.read_bit(i, 1)) for i in self._event_flags]), 0)
 
-    def get_game_state_reward(self, print_stats=False):
+    def get_game_state_reward(self):
         # addresses from https://datacrystal.romhacking.net/wiki/Pok%C3%A9mon_Red/Blue:RAM_map
         # https://github.com/pret/pokered/blob/91dc3c9f9c8fd529bb6e8307b58b96efa0bec67e/constants/event_constants.asm
         state_scores = {
             'event': self.reward_scale * (self.update_max_event_reward() ** 2) * 0.01,
-            'level': self.reward_scale * self.get_levels_reward(),
+            'level': self.reward_scale * self.get_levels_reward() ** 2,
             # 'xp': self.reward_scale * self.get_xp_reward() * 0.1,
             'items': self.reward_scale * self.get_items_reward(),
             'heal': self.reward_scale * self.total_healing_reward,
@@ -670,7 +661,7 @@ class GoldGymEnv(Env):
             'caught_count': self.reward_scale * self.get_caught_count() * 0.1,
             'explore': self.reward_scale * self.explore_weight * self.get_explore_reward(),
             'map_explore': self.reward_scale * self.get_maps_explored(),
-            'neg_steps': self.step_count * -0.001
+            'neg_steps': self.step_count * -0.01
         }
 
         return state_scores
