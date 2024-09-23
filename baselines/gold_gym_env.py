@@ -146,6 +146,7 @@ class GoldGymEnv(Env):
         self.num_elements = 20000  # max
         self.init_state = None if 'init_state' not in config else config['init_state']
         self.load_once = False if 'load_once' not in config else config['load_once']
+        self.random_reload = 0 if 'random_reload' not in config else config['random_reload']
         self.loaded = False
         self.act_freq = config['action_freq']
         self.max_steps = config['max_steps']
@@ -236,11 +237,26 @@ class GoldGymEnv(Env):
             self.seed = seed
 
         # restart game, skipping credits
+        reload = False
         if self.init_state:
-            with open(self.init_state, "rb") as f:
-                self.pyboy.load_state(f)
-            if self.load_once and not self.loaded:
-                self.init_state = None
+            if not self.loaded:
+                print("initial load")
+                with open(self.init_state, "rb") as f:
+                    self.pyboy.load_state(f)
+                    reload = True
+            elif self.loaded and not self.load_once:
+                print("not load_once load")
+                with open(self.init_state, "rb") as f:
+                    self.pyboy.load_state(f)
+                    reload = True
+            elif random.random() < self.random_reload:
+                print("-- random reload")
+                with open(self.init_state, "rb") as f:
+                    self.pyboy.load_state(f)
+                    reload = True
+
+        if not reload:
+            return self.render(), {}
 
         if not self.loaded:
             if self.use_screen_explore:

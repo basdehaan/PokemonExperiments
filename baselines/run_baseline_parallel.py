@@ -3,31 +3,28 @@ import random
 from os.path import exists
 from pathlib import Path
 import uuid
-from typing import Callable
 
 from gold_gym_env import GoldGymEnv
 from stable_baselines3 import PPO
-from stable_baselines3.common import env_checker
-from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
+from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.utils import set_random_seed
 from stable_baselines3.common.callbacks import CheckpointCallback
 
 
-def make_env(rank, env_conf, seed=0):
+def make_env(i, env_conf, seed=0):
     """
-    Utility function for multiprocessed env.
-    :param env_id: (str) the environment ID
-    :param num_env: (int) the number of environments you wish to have in subprocesses
+    Utility function for parallel envs.
+    :param i: index of the subprocess
+    :param env_conf: settings for the env
     :param seed: (int) the initial seed for RNG
-    :param rank: (int) index of the subprocess
     """
-    if rank != 0 or seed == 0:
+    if i != 0 or seed == 0:
         seed = random.randint(0, 10000)
 
     def _init():
-        env = GoldGymEnv(env_conf)
-        env.reset(seed=(seed + rank))
-        return env
+        _env = GoldGymEnv(env_conf)
+        _env.reset(seed=(seed + i))
+        return _env
 
     set_random_seed(seed)
     return _init
@@ -35,16 +32,16 @@ def make_env(rank, env_conf, seed=0):
 
 if __name__ == '__main__':
 
-    ep_length = 5000
+    ep_length = 500
     sess_path = Path(f'session_{str(uuid.uuid4())[:8]}')
-    # sess_path = Path("_session_continuous")
     init_state = '../PokemonGold_chose_totodile.gbc.state'
     try:
         save_states = os.listdir('../baselines/_session_continuous/final_states')
         save_state_scores = [s[1:s.index("_")] for s in save_states]
         save_state_scores = [float(s) for s in save_state_scores]
         index = save_state_scores.index(max(save_state_scores))
-        init_state = '../baselines/_session_continuous/final_states/' + save_states[index]
+        # init_state = '../baselines/_session_continuous/final_states/' + save_states[index]
+        sess_path = Path("_session_continuous")
     except:
         pass
     print("loading init state", init_state)
@@ -53,25 +50,33 @@ if __name__ == '__main__':
 
     env_config = {
         'headless': True, 'save_final_state': True, 'early_stop': False,
-        'action_freq': 24, 'load_once': True,
+        'action_freq': 24, 'load_once': True, 'random_reload': 0.05,
         'init_state': init_state,
         'max_steps': ep_length,
         'print_rewards': True, 'save_video': False, 'fast_video': True, 'session_path': sess_path,
         'gb_path': '../PokemonGold.gbc', 'debug': False, 'sim_frame_dist': 2_00_000.0,
         'use_screen_explore': False, 'extra_buttons': False, 'explore_weight': 1
     }
-    env_config_1 = env_config.copy()
-    env_config_1['headless'] = False
 
-    num_cpu = 1  # 64 #46  # Also sets the number of episodes per training iteration
-    env = SubprocVecEnv([make_env(i, env_config_1 if i % 12 == 0 else env_config, seed=672) for i in
+    def get_env_config_for_i(i):
+        _env = env_config.copy()
+        # if i < 2:
+        #     # 2 visible windows
+        #     _env['headless'] = False
+        # if i % 2 == 0:
+        #     # reload half the windows every iteration
+        #     _env['load_once'] = False
+        return _env
+
+    num_cpu = 24  # 64 #46  # Also sets the number of episodes per training iteration
+    env = SubprocVecEnv([make_env(i, get_env_config_for_i(i), seed=672) for i in
                          range(num_cpu)])
 
     checkpoint_callback = CheckpointCallback(save_freq=ep_length, save_path=str(sess_path),
                                              name_prefix='poke')
 
-    learn_steps = 25
-    search_folder = "new_session"
+    learn_steps = 100
+    search_folder = "_session_continuous"
 
     files = [f for f in os.listdir(f'../baselines/{search_folder}') if 'poke' in f]
 
@@ -102,3 +107,5 @@ if __name__ == '__main__':
         agent.learn(total_timesteps=ep_length * num_cpu,
                     callback=checkpoint_callback,
                     reset_num_timesteps=False)
+        if agent.num_timesteps > 1_000_000:
+            break
