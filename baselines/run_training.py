@@ -4,7 +4,7 @@ from os.path import exists
 from pathlib import Path
 import uuid
 
-from gold_gym_env import GoldGymEnv
+from gold_env import GoldGymEnv
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.utils import set_random_seed
@@ -32,7 +32,7 @@ def make_env(i, env_conf, seed=0):
 
 if __name__ == '__main__':
 
-    ep_length = 500
+    ep_length = 1000
     sess_path = Path(f'session_{str(uuid.uuid4())[:8]}')
     init_state = '../PokemonGold_chose_totodile.gbc.state'
     try:
@@ -49,7 +49,7 @@ if __name__ == '__main__':
 
     env_config = {
         'headless': True, 'save_final_state': True, 'early_stop': False,
-        'action_freq': 24, 'load_once': True, 'random_reload': 0.01,
+        'action_freq': 48, 'load_once': True, 'random_reload': 0, 'rolling_reload': 50,
         'init_state': init_state,
         'max_steps': ep_length,
         'print_rewards': True, 'save_video': False, 'fast_video': True, 'session_path': sess_path,
@@ -62,10 +62,12 @@ if __name__ == '__main__':
         if i < 1:
             # n visible windows
             _env['headless'] = False
+            _env['random_reload'] = 0
+            _env['rolling_reload'] = -1
         return _env
 
-    num_cpu = 24  # 64 #46  # Also sets the number of episodes per training iteration
-    env = SubprocVecEnv([make_env(i, get_env_config_for_i(i), seed=672) for i in
+    num_cpu = 32  # 64 #46  # Also sets the number of episodes per training iteration
+    env = SubprocVecEnv([make_env(i, get_env_config_for_i(i), seed=0) for i in
                          range(num_cpu)])
 
     checkpoint_callback = CheckpointCallback(save_freq=ep_length, save_path=str(sess_path),
@@ -80,7 +82,7 @@ if __name__ == '__main__':
                    key=lambda x: int(str(x).replace('poke_', '').replace('_steps.zip', '')),
                    reverse=True)
     print(files)
-    agent = PPO('CnnPolicy', env, verbose=1, n_steps=ep_length, batch_size=32, n_epochs=10,
+    agent = PPO('CnnPolicy', env, verbose=1, n_steps=ep_length, batch_size=64, n_epochs=30,
                 gamma=0.99,
                 learning_rate=0.01)
     if len(files) > 0:
@@ -94,7 +96,7 @@ if __name__ == '__main__':
             agent.n_steps = ep_length
             agent.n_epochs = 30
             agent.n_envs = num_cpu
-            agent.learning_rate = min(0.1, 0.003 * num_cpu)
+            agent.learning_rate = 0.01
             agent.rollout_buffer.buffer_size = ep_length
             agent.rollout_buffer.n_envs = num_cpu
             agent.rollout_buffer.reset()
@@ -103,5 +105,6 @@ if __name__ == '__main__':
         agent.learn(total_timesteps=ep_length * num_cpu,
                     callback=checkpoint_callback,
                     reset_num_timesteps=False)
-        if agent.num_timesteps > 1_000_000:
+
+        if agent.num_timesteps > 10_000_000:
             break

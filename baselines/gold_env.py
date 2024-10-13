@@ -145,6 +145,8 @@ class GoldGymEnv(Env):
         self.init_state = None if 'init_state' not in config else config['init_state']
         self.load_once = False if 'load_once' not in config else config['load_once']
         self.random_reload = 0 if 'random_reload' not in config else config['random_reload']
+        self.rolling_reload = -1 if 'rolling_reload' not in config else config['rolling_reload']
+        self.reload_roll = random.randint(0, self.rolling_reload - 1) if self.rolling_reload > 0 else 0
         self.loaded = False
         self.act_freq = config['action_freq']
         self.max_steps = config['max_steps']
@@ -166,7 +168,7 @@ class GoldGymEnv(Env):
 
         # Set this in SOME subclasses
         self.metadata = {"render.modes": []}
-        self.reward_range = (-10, 100)
+        self.reward_range = (-10, 1000)
 
         self.valid_actions = [
             WindowEvent.PRESS_ARROW_DOWN,
@@ -241,13 +243,20 @@ class GoldGymEnv(Env):
                 with open(self.init_state, "rb") as f:
                     self.pyboy.load_state(f)
             elif self.loaded and not self.load_once:
-                print("not load_once load")
+                print("-- not-load_once load")
                 with open(self.init_state, "rb") as f:
                     self.pyboy.load_state(f)
+            elif self.reload_roll == self.rolling_reload:
+                print("-- rolling reload")
+                with open(self.init_state, "rb") as f:
+                    self.pyboy.load_state(f)
+                self.reload_roll = 0
             elif random.random() < self.random_reload:
                 print("-- random reload")
                 with open(self.init_state, "rb") as f:
                     self.pyboy.load_state(f)
+
+        self.reload_roll = self.reload_roll + 1
 
         if not self.loaded:
             if self.use_screen_explore:
@@ -648,19 +657,19 @@ class GoldGymEnv(Env):
         state_scores = {
             'event': self.reward_scale * (self.update_max_event_reward() ** 2) * 0.01,
             'level': self.reward_scale * self.get_levels_reward() ** 2,
-            # 'xp': self.reward_scale * self.get_xp_reward() * 0.1,
+            'xp': self.reward_scale * self.get_xp_reward() * 0.01,
             'items': self.reward_scale * self.get_items_reward(),
             'heal': self.reward_scale * self.total_healing_reward,
             'op_lvl': self.reward_scale * self.update_max_op_level(),
             'op_dmg': self.reward_scale * self.get_damage_reward(),
-            'dead': self.reward_scale * -1.0 * self.died_count,
+            # 'dead': self.reward_scale * -1.0 * self.died_count,
             'badge': self.reward_scale * self.get_badges() * 5,
-            'hms': self.reward_scale * self.get_hms() * 5,
+            # 'hms': self.reward_scale * self.get_hms() * 5,
             # 'money': self.reward_scale* money * 3,
             'seen_count': self.reward_scale * self.get_seen_count() * 0.01,
             'caught_count': self.reward_scale * self.get_caught_count() * 0.1,
             'explore': self.reward_scale * self.explore_weight * self.get_explore_reward(),
-            'map_explore': self.reward_scale * self.get_maps_explored(),
+            'map_explore': self.reward_scale * self.get_maps_explored() ** 2,
             'neg_steps': self.step_count * -0.01
         }
 
