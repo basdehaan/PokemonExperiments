@@ -59,7 +59,7 @@ if __name__ == '__main__':
 
     def get_env_config_for_i(i):
         _env = env_config.copy()
-        if i < 1:
+        if i < 0:
             # n visible windows
             _env['headless'] = False
             _env['random_reload'] = 0
@@ -76,7 +76,7 @@ if __name__ == '__main__':
     learn_steps = 100
     search_folder = "_session_continuous"
 
-    files = [f for f in os.listdir(f'/{search_folder}') if 'poke' in f]
+    files = [f for f in os.listdir(f'./{search_folder}') if 'poke' in f]
 
     files = sorted(files,
                    key=lambda x: int(str(x).replace('poke_', '').replace('_steps.zip', '')),
@@ -106,5 +106,5 @@ if __name__ == '__main__':
                     callback=checkpoint_callback,
                     reset_num_timesteps=False)
 
-        if agent.num_timesteps > 10_000_000:
+        if agent.num_timesteps > 100_000:
             break
