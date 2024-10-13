@@ -36,12 +36,12 @@ if __name__ == '__main__':
     sess_path = Path(f'session_{str(uuid.uuid4())[:8]}')
     init_state = '../PokemonGold_chose_totodile.gbc.state'
     try:
-        save_states = os.listdir('../baselines/_session_continuous/final_states')
+        save_states = os.listdir('../_session_continuous/final_states')
         save_state_scores = [s[1:s.index("_")] for s in save_states]
         save_state_scores = [float(s) for s in save_state_scores]
         index = save_state_scores.index(max(save_state_scores))
-        # init_state = '../baselines/_session_continuous/final_states/' + save_states[index]
-        sess_path = Path("_session_continuous")
+        # init_state = '../pokemon_rl/_session_continuous/final_states/' + save_states[index]
+        sess_path = Path("../_session_continuous")
     except:
         pass
     print("loading init state", init_state)
@@ -76,7 +76,7 @@ if __name__ == '__main__':
     learn_steps = 100
     search_folder = "_session_continuous"
 
-    files = [f for f in os.listdir(f'../baselines/{search_folder}') if 'poke' in f]
+    files = [f for f in os.listdir(f'/{search_folder}') if 'poke' in f]
 
     files = sorted(files,
                    key=lambda x: int(str(x).replace('poke_', '').replace('_steps.zip', '')),

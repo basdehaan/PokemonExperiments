@@ -1,5 +1,13 @@
-FROM python3.10
+FROM python:3.11-slim
 
-ADD ./baselines .
+RUN apt-get update
+RUN pip install --upgrade pip
 
-CMD ["python3.10", "./baselines/run_training.py"]
+ADD pokemon_rl/ ./pokemon_rl/
+ADD requirements.txt ./pokemon_rl/
+
+RUN pip install -r ./pokemon_rl/requirements.txt
+
+#CMD ["pwd"]
+CMD ["python", "/pokemon_rl/run_training.py"]
+#CMD ["sleep", "infinity"]
