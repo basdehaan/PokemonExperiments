@@ -40,7 +40,7 @@ if __name__ == '__main__':
         save_state_scores = [s[1:s.index("_")] for s in save_states]
         save_state_scores = [float(s) for s in save_state_scores]
         index = save_state_scores.index(max(save_state_scores))
-        # init_state = '../pokemon_rl/_session_continuous/final_states/' + save_states[index]
+        # init_state = '../training/_session_continuous/final_states/' + save_states[index]
         sess_path = Path("../_session_continuous")
     except:
         pass
