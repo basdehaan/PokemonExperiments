@@ -1,4 +1,6 @@
+import os
 import random
+import re
 import sys
 import uuid
 from math import floor
@@ -138,6 +140,7 @@ class GoldGymEnv(Env):
         self.debug = config['debug']
         self.s_path = config['session_path']
         self.save_final_state = config['save_final_state']
+        self.save_stats_and_runs = True if 'save_stats_and_runs' not in config else config['save_stats_and_runs']
         self.print_rewards = config['print_rewards']
         self.vec_dim = 4320  # 1000
         self.headless = config['headless']
@@ -157,7 +160,7 @@ class GoldGymEnv(Env):
         self.downsample_factor = 2
         self.frame_stacks = 3
         self.explore_weight = 1 if 'explore_weight' not in config else config['explore_weight']
-        self.use_screen_explore = True if 'use_screen_explore' not in config else config['use_screen_explore']
+        self.explore_method = 'HYBRID' if 'explore_method' not in config else config['explore_method']
         self.similar_frame_dist = config['sim_frame_dist']
         self.reward_scale = 1 if 'reward_scale' not in config else config['reward_scale']
         self.extra_buttons = False if 'extra_buttons' not in config else config['extra_buttons']
@@ -177,6 +180,7 @@ class GoldGymEnv(Env):
             WindowEvent.PRESS_ARROW_UP,
             WindowEvent.PRESS_BUTTON_A,
             WindowEvent.PRESS_BUTTON_B,
+            WindowEvent.PASS
         ]
 
         if self.extra_buttons:
@@ -197,9 +201,10 @@ class GoldGymEnv(Env):
             WindowEvent.RELEASE_BUTTON_B
         ]
 
-        self.output_shape = (36, 40, 3)
-        self.mem_padding = 2
-        self.memory_height = 8
+        pixel_factor = 0.5
+        self.output_shape = (int(144 * pixel_factor), int(160 * pixel_factor), 3)
+        self.mem_padding = 1
+        self.memory_height = 4
         self.col_steps = 16
         self.output_full = (
             self.output_shape[0] * self.frame_stacks + 2 * (self.mem_padding + self.memory_height),
@@ -239,27 +244,26 @@ class GoldGymEnv(Env):
         # restart game, skipping credits
         if self.init_state:
             if not self.loaded:
-                print("initial load")
+                # print("initial load")
                 with open(self.init_state, "rb") as f:
                     self.pyboy.load_state(f)
             elif self.loaded and not self.load_once:
-                print("-- not-load_once load")
                 with open(self.init_state, "rb") as f:
                     self.pyboy.load_state(f)
             elif self.reload_roll == self.rolling_reload:
-                print("-- rolling reload")
+                # print("-- rolling reload")
                 with open(self.init_state, "rb") as f:
                     self.pyboy.load_state(f)
                 self.reload_roll = 0
             elif random.random() < self.random_reload:
-                print("-- random reload")
+                # print("-- random reload")
                 with open(self.init_state, "rb") as f:
                     self.pyboy.load_state(f)
 
         self.reload_roll = self.reload_roll + 1
 
         if not self.loaded:
-            if self.use_screen_explore:
+            if self.explore_method in ["SCREEN", "HYBRID"]:
                 self.init_knn()
             self.init_map_mem()
 
@@ -313,6 +317,8 @@ class GoldGymEnv(Env):
 
     def render(self, reduce_res=True, add_memory=True, update_mem=True):
         game_pixels_render = self.screen.screen_ndarray()  # (144, 160, 3)
+        # convert to gray
+        # game_pixels_render = np.dot(game_pixels_render[...,:3], [0.299, 0.587, 0.114])
         if reduce_res:
             game_pixels_render = (255 * resize(game_pixels_render, self.output_shape)).astype(np.uint8)
             if update_mem:
@@ -345,7 +351,7 @@ class GoldGymEnv(Env):
         obs_flat = obs_memory[
                    frame_start:frame_start + self.output_shape[0], ...].flatten().astype(np.float32)
 
-        if self.use_screen_explore:
+        if self.explore_method in ["SCREEN", "HYBRID"]:
             self.update_frame_knn_index(obs_flat)
         self.update_seen_coords()
 
@@ -367,7 +373,7 @@ class GoldGymEnv(Env):
 
         self.step_count += 1
 
-        return obs_memory, new_reward * 0.1, False, step_limit_reached, {}
+        return obs_memory, new_reward, False, step_limit_reached, {}
 
     def run_action_on_emulator(self, action):
         # press button then release after some steps
@@ -403,16 +409,11 @@ class GoldGymEnv(Env):
         y_pos = self.read_m(self._map_position_y)
         map_n = str(self.read_m(self._map_bank_no)) + "_" + str(self.read_m(self._map_map_no))
         levels = [self.read_m(a) for a in self._pokemon_lvs]
-        if self.use_screen_explore:
-            expl = ('frames', self.knn_index.get_current_count())
-        else:
-            expl = ('coord_count', len(self.seen_coords))
         self.agent_stats.append({
             'step': self.step_count, 'x': x_pos, 'y': y_pos, 'map': map_n,
             'last_action': action,
             'pcount': self.read_m(self._party_total), 'levels': levels, 'ptypes': self.read_party(),
             'hp': self.read_hp_fraction(),
-            expl[0]: expl[1],
             'deaths': self.died_count, 'badge': self.get_badges(),
             'event': self.progress_reward['event'], 'healr': self.total_healing_reward
         })
@@ -441,15 +442,40 @@ class GoldGymEnv(Env):
     def update_seen_coords(self):
         x_pos = self.read_m(self._map_position_x)
         y_pos = self.read_m(self._map_position_y)
+        # Maps:
+        # lab: 24_5
+        # new bark town: 24_4
+        # new bark house bottom right: 24_9
+        # new bark house bottom left: 24_8
+        # home: 24_6
+        # home upstairs: 24_7
+        # route 29: 24_3
         map_n = str(self.read_m(self._map_bank_no)) + "_" + str(self.read_m(self._map_map_no))
         coord_string = f"x:{x_pos} y:{y_pos} m:{map_n}"
-        if self.get_levels_sum() >= self.levels_satisfied_min and not self.levels_satisfied:
-            self.levels_satisfied = True
-            self.base_explore = len(self.seen_coords)
-            self.seen_coords = {}
 
         self.seen_coords[coord_string] = self.step_count
         self.seen_maps.add(map_n)
+        if not self.headless:
+            if self.step_count % 200 == 0:
+                arr_dict = {}
+                for k in self.seen_coords.keys():
+                    x, y, m = re.findall(r'[0-9_]+', k)
+                    if m not in arr_dict.keys():
+                        arr_dict[m] = np.ones((100, 100))
+                    arr_dict[m][int(y), int(x)] = 0
+                from matplotlib import pyplot as plt
+                (self.s_path / Path("maps")).mkdir(exist_ok=True)
+                for m, img in arr_dict.items():
+                    crop = True
+                    def crop_image(image):
+                        if not crop:
+                            return image
+                        mask = image != 1
+                        mask0, mask1 = np.any(mask, 0), np.any(mask, 1)
+                        return image[np.ix_(mask1, mask0)]
+
+                    plt.imshow(crop_image(img), cmap="gray")
+                    plt.savefig(self.s_path / Path("maps") / Path(f"{m}.png"))
 
     def update_reward(self):
         # compute reward
@@ -545,17 +571,17 @@ class GoldGymEnv(Env):
 
         if self.print_rewards and done:
             print('', flush=True)
-            if self.save_final_state:
-                fs_path = self.s_path / Path('final_states')
-                fs_path.mkdir(exist_ok=True)
-                # plt.imsave(
-                #     fs_path / Path(f'frame_r{self.total_reward:.4f}_{self.reset_count}_small.jpeg'),
-                #     obs_memory)
-                # plt.imsave(
-                #     fs_path / Path(f'frame_r{self.total_reward:.4f}_{self.reset_count}_full.jpeg'),
-                #     self.render(reduce_res=False))
-                with open(str(self.s_path) + f"/final_states/r{self.total_reward:.4f}_{self.reset_count}.state", "bw") as f:
-                    self.pyboy.save_state(f)
+        if self.save_final_state and done:
+            fs_path = self.s_path / Path('final_states')
+            fs_path.mkdir(exist_ok=True)
+            # plt.imsave(
+            #     fs_path / Path(f'frame_r{self.total_reward:.4f}_{self.reset_count}_small.jpeg'),
+            #     obs_memory)
+            # plt.imsave(
+            #     fs_path / Path(f'frame_r{self.total_reward:.4f}_{self.reset_count}_full.jpeg'),
+            #     self.render(reduce_res=False))
+            with open(str(self.s_path) + f"/final_states/r{self.total_reward:.4f}_{self.reset_count}.state", "bw") as f:
+                self.pyboy.save_state(f)
 
         if self.save_video and done:
             self.full_frame_writer.close()
@@ -563,10 +589,11 @@ class GoldGymEnv(Env):
 
         if done:
             self.all_runs.append(self.progress_reward)
-            with open(self.s_path / Path(f'all_runs_{self.instance_id}.json'), 'w') as f:
-                json.dump(self.all_runs, f)
-            pd.DataFrame(self.agent_stats).to_csv(
-                self.s_path / Path(f'agent_stats_{self.instance_id}.csv.gz'), compression='gzip', mode='a')
+            if self.save_stats_and_runs:
+                with open(self.s_path / Path(f'all_runs_{self.instance_id}.json'), 'w') as f:
+                    json.dump(self.all_runs, f)
+                pd.DataFrame(self.agent_stats).to_csv(
+                    self.s_path / Path(f'agent_stats_{self.instance_id}.csv.gz'), compression='gzip', mode='a')
 
     def read_m(self, addr):
         return self.pyboy.get_memory_value(addr)
@@ -591,18 +618,30 @@ class GoldGymEnv(Env):
         num_items = max(self.read_m(self._num_items), 0)
         num_ball_items = max(self.read_m(self._num_ball_items), 0)
         num_key_items = max(self.read_m(self._num_key_items), 0)
-        return sum([num_items * 0.05, num_ball_items * 0.1, num_key_items * 2])
+        return sum([num_items * 20, num_ball_items * 5, num_key_items * 10])
 
     def get_explore_reward(self):
-        if not self.use_screen_explore:
-            return len(self.seen_coords) * 0.1
-
+        bonus_reward_maps = ["24_3"] # next route
+        bonus_reward = 2
+        low_reward_maps = ["24_9", "24_8", "24_6", "24_7"] # houses in new bark town
+        low_reward = 1
+        steps = len(self.seen_coords)
+        for m in bonus_reward_maps:
+            steps += len([x for x in self.seen_coords.keys() if f"m:{m}" in x]) * (bonus_reward - 1)
+        for m in low_reward_maps:
+            steps -= len([x for x in self.seen_coords.keys() if f"m:{m}" in x]) * (1 - low_reward)
+        if self.explore_method == "STEPS":
+            return steps
         pre_rew = 0.005
         post_rew = 0.01
         cur_size = self.knn_index.get_current_count()
         base = (self.base_explore if self.levels_satisfied else cur_size) * pre_rew
         post = (cur_size if self.levels_satisfied else 0) * post_rew
-        return base + post
+        screen = base + post
+        if self.explore_method == "SCREEN":
+            return screen
+        if self.explore_method == "HYBRID":
+            return steps + screen
 
     def get_badges(self):
         return self.bit_count(self.read_m(self._badges))
@@ -617,7 +656,7 @@ class GoldGymEnv(Env):
         return self.read_pokedex_count(self._pokedex_own_from, self._pokedex_own_to)
 
     def get_maps_explored(self):
-        return len(self.seen_maps)
+        return len(self.seen_maps) if len(self.seen_maps) < 8 else len(self.seen_maps) * 2
 
     def read_party(self):
         return [self.read_m(addr) for addr in self._party_pokemon]
@@ -627,9 +666,9 @@ class GoldGymEnv(Env):
         if cur_health > self.last_health:
             if self.last_health > 0:
                 heal_amount = cur_health - self.last_health
-                if heal_amount > 0.5:  # exclude levelups
-                    print(f'healed: {heal_amount}')
-                    self.save_screenshot('healing')
+                # if heal_amount > 0.5:  # exclude levelups
+                #     print(f'healed: {heal_amount}')
+                #     self.save_screenshot('healing')
                 self.total_healing_reward += heal_amount
             else:
                 self.died_count += 1
@@ -655,22 +694,22 @@ class GoldGymEnv(Env):
         # addresses from https://datacrystal.romhacking.net/wiki/Pok%C3%A9mon_Red/Blue:RAM_map
         # https://github.com/pret/pokered/blob/91dc3c9f9c8fd529bb6e8307b58b96efa0bec67e/constants/event_constants.asm
         state_scores = {
-            'event': self.reward_scale * (self.update_max_event_reward() ** 2) * 0.01,
-            'level': self.reward_scale * self.get_levels_reward() ** 2,
-            'xp': self.reward_scale * self.get_xp_reward() * 0.01,
-            'items': self.reward_scale * self.get_items_reward(),
-            'heal': self.reward_scale * self.total_healing_reward,
-            'op_lvl': self.reward_scale * self.update_max_op_level(),
-            'op_dmg': self.reward_scale * self.get_damage_reward(),
-            # 'dead': self.reward_scale * -1.0 * self.died_count,
-            'badge': self.reward_scale * self.get_badges() * 5,
-            # 'hms': self.reward_scale * self.get_hms() * 5,
-            # 'money': self.reward_scale* money * 3,
-            'seen_count': self.reward_scale * self.get_seen_count() * 0.01,
-            'caught_count': self.reward_scale * self.get_caught_count() * 0.1,
+            'event': self.reward_scale * self.update_max_event_reward(),
+            'level': self.reward_scale * self.get_levels_reward() * 2,
+            # 'xp': self.reward_scale * self.get_xp_reward(),
+            # 'items': self.reward_scale * self.get_items_reward(),
+            # 'heal': self.reward_scale * self.total_healing_reward,
+            # 'op_lvl': self.reward_scale *w self.update_max_op_level(),
+            # 'op_dmg': self.reward_scale * self.get_damage_reward() * 2,
+            # # 'dead': self.reward_scale * -1.0 * self.died_count,
+            # 'badge': self.reward_scale * self.get_badges() * 5,
+            # # 'hms': self.reward_scale * self.get_hms() * 5,
+            # # 'money': self.reward_scale* money * 3,
+            # 'seen_count': self.reward_scale * self.get_seen_count(),
+            # 'caught_count': self.reward_scale * self.get_caught_count(),
             'explore': self.reward_scale * self.explore_weight * self.get_explore_reward(),
-            'map_explore': self.reward_scale * self.get_maps_explored() ** 2,
-            'neg_steps': self.step_count * -0.01
+            'map_explore': self.reward_scale * self.get_maps_explored() * 5,
+            'neg_steps': -0.005
         }
 
         return state_scores
@@ -689,9 +728,9 @@ class GoldGymEnv(Env):
 
     def update_max_event_reward(self):
         cur_rew = self.get_all_events_reward()
-        # if cur_rew - self.max_event_rew > 10:
-        #     print(f"\nhit event: {cur_rew}. resetting map mem")
-        #     self.init_map_mem()
+        if cur_rew > self.max_event_rew:
+            # print(f"\nhit event: {cur_rew}. resetting map mem")
+            self.init_map_mem()
         self.max_event_rew = max(cur_rew, self.max_event_rew)
         return self.max_event_rew
 
