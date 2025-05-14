@@ -7,6 +7,10 @@ from training.pokemon_env import PokeGymEnv
 
 
 class GoldGymEnv(PokeGymEnv):
+
+    gb_path = '../PokemonGold.gbc'
+    init_state = gb_path + ".state"
+
     _map_position_x = 0xD20D
     _map_position_y = 0xD20E
     _map_bank_no = 0xDA00

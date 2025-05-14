@@ -28,7 +28,6 @@ class PokeGymEnv(Env):
         self.vec_dim = 4320  # 1000
         self.headless = config['headless']
         self.num_elements = 20000  # max
-        self.init_state = None if 'init_state' not in config else config['init_state']
         self.load_once = False if 'load_once' not in config else config['load_once']
         self.random_reload = 0 if 'random_reload' not in config else config['random_reload']
         self.rolling_reload = -1 if 'rolling_reload' not in config else config['rolling_reload']
@@ -102,7 +101,7 @@ class PokeGymEnv(Env):
         head = 'headless' if config['headless'] else 'SDL2'
 
         self.pyboy = PyBoy(
-            config['gb_path'],
+            self.gb_path,
             debugging=False,
             disable_input=False,
             window_type=head,
@@ -141,8 +140,15 @@ class PokeGymEnv(Env):
                 with open(self.init_state, "rb") as f:
                     self.pyboy.load_state(f)
                     self.init_knn_map()
-        elif not self.loaded:
-            self.init_knn_map()
+        else:
+            if not self.loaded:
+                self.init_knn_map()
+            # elif not self.load_once:
+                # reload without using an init state
+                # self.pyboy.game_wrapper().reset_game()
+                # self.init_knn_map()
+
+
 
         self.reload_roll = self.reload_roll + 1
 
