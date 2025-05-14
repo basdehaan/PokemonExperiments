@@ -42,8 +42,8 @@ if __name__ == '__main__':
     num_cpu = 32
     episodes = 1000
 
-    learning_rate = 0.05
-    n_epochs = 30
+    learning_rate = 0.08
+    n_epochs = 10
     batch_size = 64
 
     types = [
@@ -67,13 +67,13 @@ if __name__ == '__main__':
 
     def get_env_config_for_i(i):
         _env = env_config.copy()
-        _env['class'] = random.choice(types)
+        # _env['class'] = random.choice(types)
         if i < len(types):
             # n visible windows
             _env['headless'] = False
             _env['random_reload'] = 0
             _env['rolling_reload'] = -1
-            _env['class'] = types[i]
+        _env['class'] = types[i]
         return _env
 
 
