@@ -73,7 +73,7 @@ if __name__ == '__main__':
             _env['headless'] = False
             _env['random_reload'] = 0
             _env['rolling_reload'] = -1
-        _env['class'] = types[i]
+        _env['class'] = types[i % len(types)]
         return _env
 
 
