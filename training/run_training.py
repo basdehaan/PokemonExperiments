@@ -45,7 +45,7 @@ if __name__ == '__main__':
     num_cpu = 32
     episodes = 1000
     sess_path = Path(f'session_{str(uuid.uuid4())[:8]}')
-    init_state = '../PokemonGold_chose_totodile_nickname_done.gbc.state'
+    # init_state = '../PokemonGold_chose_totodile_nickname_done.gbc.state'
     try:
         sess_path = Path("../_session_continuous")
         save_states = os.listdir('../_session_continuous/final_states')
@@ -56,13 +56,13 @@ if __name__ == '__main__':
     except Exception as e:
         print("exception", e)
         pass
-    print("loading init state", init_state)
+    # print("loading init state", init_state)
     print(sess_path)
 
     env_config = {
         'headless': True, 'save_final_state': False, 'early_stop': False,
         'action_freq': 48, 'load_once': True, 'random_reload': 0, 'rolling_reload': -1,
-        'init_state': init_state,
+        # 'init_state': init_state,
         'max_steps': ep_length,
         'save_stats_and_runs': False,
         'print_rewards': False, 'save_video': False, 'fast_video': True, 'session_path': sess_path,
@@ -70,17 +70,18 @@ if __name__ == '__main__':
         'explore_method': 'STEPS', 'extra_buttons': False, 'explore_weight': 1
     }
 
-    gb_paths = ['../PokemonGold.gbc', '../PokemonRed.gbc']
+    gb_paths = ['../PokemonGold.gbc', '../PokemonRed.gb']
     
     def get_env_config_for_i(i):
         _env = env_config.copy()
-        if i < 2:
+        _env['gb_path'] = random.choice(gb_paths)
+        if i < len(gb_paths):
             # n visible windows
             _env['headless'] = False
             _env['random_reload'] = 0
             _env['rolling_reload'] = -1
-        _env['gb_path'] = gb_paths[i % len(gb_paths)]
-        _env['init_state'] = f'{gb_paths[i % len(gb_paths)]}.state'
+            _env['gb_path'] = gb_paths[i % len(gb_paths)]
+        # _env['init_state'] = f'{gb_paths[i % len(gb_paths)]}.state'
         return _env
 
 
@@ -98,8 +99,8 @@ if __name__ == '__main__':
                    key=lambda x: int(str(x).replace('poke_', '').replace('_steps.zip', '')),
                    reverse=True)
     print(files)
-    learning_rate = 0.03
-    n_epochs = 10
+    learning_rate = 0.05
+    n_epochs = 30
     batch_size = 64
 
     # policy model shape
