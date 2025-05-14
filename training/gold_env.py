@@ -1,20 +1,7 @@
-import random
 import re
-import sys
-import uuid
-from math import floor
 from pathlib import Path
 
 import numpy as np
-from einops import rearrange
-import matplotlib.pyplot as plt
-from skimage.transform import resize
-from pyboy import PyBoy
-import hnswlib
-import mediapy as media
-
-from gymnasium import spaces
-from pyboy.utils import WindowEvent
 
 from training.pokemon_env import PokeGymEnv
 
@@ -137,10 +124,6 @@ class GoldGymEnv(PokeGymEnv):
             self, config=None):
         super().__init__(config)
 
-
-
-
-
     def update_seen_coords(self):
         super().update_seen_coords()
         # Maps:
@@ -163,6 +146,7 @@ class GoldGymEnv(PokeGymEnv):
                 (self.s_path / Path("maps")).mkdir(exist_ok=True)
                 for m, img in arr_dict.items():
                     crop = True
+
                     def crop_image(image):
                         if not crop:
                             return image
