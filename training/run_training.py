@@ -38,7 +38,7 @@ def make_env(i, env_conf, seed=0):
 
 if __name__ == '__main__':
 
-    ep_length = 200
+    ep_length = 1000
     num_cpu = 32
     episodes = 1000
 

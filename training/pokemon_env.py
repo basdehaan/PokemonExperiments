@@ -113,6 +113,11 @@ class PokeGymEnv(Env):
         if not config['headless']:
             self.pyboy.set_emulation_speed(100)
 
+        self.init_state = self.gb_path + ".state"
+        init_state_file = Path(self.init_state)
+        if not init_state_file.exists():
+            self.init_state = None
+
         self.reset()
 
     def reset(self, seed=None):
@@ -143,12 +148,6 @@ class PokeGymEnv(Env):
         else:
             if not self.loaded:
                 self.init_knn_map()
-            # elif not self.load_once:
-                # reload without using an init state
-                # self.pyboy.game_wrapper().reset_game()
-                # self.init_knn_map()
-
-
 
         self.reload_roll = self.reload_roll + 1
 
@@ -331,6 +330,11 @@ class PokeGymEnv(Env):
         self.seen_coords[coord_string] = self.step_count
         self.seen_maps.add(map_n)
 
+        if not self.init_state and len(self.seen_coords) == 2:
+            init_state_file = self.gb_path + ".state"
+            with open(init_state_file, "bw") as f:
+                self.pyboy.save_state(f)
+
     def update_reward(self):
         # compute reward
         old_prog = self.group_rewards()
@@ -463,9 +467,9 @@ class PokeGymEnv(Env):
         return sum([num_items * 20, num_ball_items * 5, num_key_items * 10])
 
     def get_explore_reward(self):
-        bonus_reward_maps = ["24_3"] # next route
+        bonus_reward_maps = ["24_3"]  # next route
         bonus_reward = 2
-        low_reward_maps = ["24_9", "24_8", "24_6", "24_7"] # houses in new bark town
+        low_reward_maps = ["24_9", "24_8", "24_6", "24_7"]  # houses in new bark town
         low_reward = 1
         steps = len(self.seen_coords)
         for m in bonus_reward_maps:

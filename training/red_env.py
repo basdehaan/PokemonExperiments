@@ -3,7 +3,6 @@ from training.pokemon_env import PokeGymEnv
 
 class RedGymEnv(PokeGymEnv):
     gb_path = '../PokemonRed.gb'
-    init_state = gb_path + ".state"
 
     _map_position_x = 0xC106  # 0xD362
     _map_position_y = 0xC104  # 0xD361
