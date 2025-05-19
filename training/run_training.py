@@ -38,12 +38,13 @@ def make_env(i, env_conf, seed=0):
 
 if __name__ == '__main__':
 
-    ep_length = 1000
-    num_cpu = 32
-    episodes = 1000
+    ep_length = 500
+    reset_length = 500
+    num_cpu = 16
+    episodes = 200
 
-    learning_rate = 0.08
-    n_epochs = 10
+    learning_rate = 0.01
+    n_epochs = 20
     batch_size = 64
 
     types = [
@@ -56,24 +57,28 @@ if __name__ == '__main__':
 
     env_config = {
         'headless': True, 'save_final_state': False, 'early_stop': False,
-        'action_freq': 48, 'load_once': False, 'random_reload': 0, 'rolling_reload': -1,
+        'action_freq': 100, 'load_once': True, 'random_reload': 0, 'rolling_reload': int(reset_length/ep_length),
         'max_steps': ep_length,
         'save_stats_and_runs': False,
         'print_rewards': False, 'save_video': False, 'fast_video': True, 'session_path': sess_path,
         'debug': False, 'sim_frame_dist': 3_00_000.0,
-        'explore_method': 'STEPS', 'extra_buttons': False, 'explore_weight': 1
+        'explore_method': 'STEPS', 'extra_buttons': False, 'explore_weight': 1,
+        'noise': 0.05
     }
 
 
-    def get_env_config_for_i(i):
+    def get_env_config_for_i(i, rand=False):
         _env = env_config.copy()
-        # _env['class'] = random.choice(types)
+        if rand:
+            _env['class'] = random.choice(types)
+        else:
+            _env['class'] = types[i % len(types)]
         if i < len(types):
             # n visible windows
             _env['headless'] = False
             _env['random_reload'] = 0
-            _env['rolling_reload'] = -1
-        _env['class'] = types[i % len(types)]
+            # _env['rolling_reload'] = -1
+            _env['class'] = types[i % len(types)]
         return _env
 
 
@@ -94,7 +99,7 @@ if __name__ == '__main__':
 
     # policy model shape
     policy_kwargs = dict(
-        net_arch=[dict(pi=[1024, 1024, 256, 128, 64], vf=[1024, 1024, 256, 128, 64])]
+        net_arch=[dict(pi=[1024, 256, 128, 64], vf=[1024, 256, 128, 64])]
     )
     agent = PPO('CnnPolicy', env, n_steps=ep_length, batch_size=batch_size, n_epochs=n_epochs,
                 learning_rate=learning_rate)

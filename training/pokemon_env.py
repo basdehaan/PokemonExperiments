@@ -43,6 +43,7 @@ class PokeGymEnv(Env):
         self.frame_stacks = 1
         self.explore_weight = 1 if 'explore_weight' not in config else config['explore_weight']
         self.explore_method = 'HYBRID' if 'explore_method' not in config else config['explore_method']
+        self.noise = 0 if 'noise' not in config else config['noise']
         self.similar_frame_dist = config['sim_frame_dist']
         self.reward_scale = 1 if 'reward_scale' not in config else config['reward_scale']
         self.extra_buttons = False if 'extra_buttons' not in config else config['extra_buttons']
@@ -111,7 +112,7 @@ class PokeGymEnv(Env):
         self.screen = self.pyboy.botsupport_manager().screen()
 
         if not config['headless']:
-            self.pyboy.set_emulation_speed(100)
+            self.pyboy.set_emulation_speed(30)
 
         self.init_state = self.gb_path + ".state"
         init_state_file = Path(self.init_state)
@@ -205,6 +206,11 @@ class PokeGymEnv(Env):
 
     def render(self, reduce_res=True, add_memory=True, update_mem=True):
         game_pixels_render = self.screen.screen_ndarray()  # (144, 160, 3)
+        if self.noise:
+            noise = np.random.normal(0, 128 * self.noise, size=game_pixels_render.shape)
+            np.reshape(noise, game_pixels_render.shape)
+            game_pixels_render = game_pixels_render + noise
+            game_pixels_render = game_pixels_render.clip(0,255)
         # convert to gray
         # game_pixels_render = np.dot(game_pixels_render[...,:3], [0.299, 0.587, 0.114])
         if reduce_res:
@@ -547,7 +553,7 @@ class PokeGymEnv(Env):
             # 'money': self.reward_scale* money * 3,
             'seen_count': self.reward_scale * self.get_seen_count(),
             'caught_count': self.reward_scale * self.get_caught_count(),
-            'explore': self.reward_scale * self.explore_weight * self.get_explore_reward(),
+            'explore': self.reward_scale * self.explore_weight * self.get_explore_reward() * 2,
             'map_explore': self.reward_scale * self.get_maps_explored() * 5,
             'neg_steps': -0.005
         }

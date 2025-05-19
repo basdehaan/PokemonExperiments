@@ -1,13 +1,10 @@
 import re
 from pathlib import Path
-
 import numpy as np
-
 from training.pokemon_env import PokeGymEnv
 
 
 class GoldGymEnv(PokeGymEnv):
-
     gb_path = '../PokemonGold.gbc'
 
     _map_position_x = 0xD20D
