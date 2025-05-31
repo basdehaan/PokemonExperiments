@@ -5,7 +5,7 @@ from training.pokemon_env import PokeGymEnv
 
 
 class RedGymEnv(PokeGymEnv):
-    gb_path = '../PokemonYellow.gb'
+    gb_path = '../PokemonYellow.gbc'
     simple_name = "yellow"
 
     _map_position_x = 0xD362
