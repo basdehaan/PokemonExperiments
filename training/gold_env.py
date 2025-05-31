@@ -6,6 +6,7 @@ from training.pokemon_env import PokeGymEnv
 
 class GoldGymEnv(PokeGymEnv):
     gb_path = '../PokemonGold.gbc'
+    simple_name = "gold"
 
     _map_position_x = 0xD20D
     _map_position_y = 0xD20E
@@ -123,36 +124,3 @@ class GoldGymEnv(PokeGymEnv):
     def __init__(
             self, config=None):
         super().__init__(config)
-
-    def update_seen_coords(self):
-        super().update_seen_coords()
-        # Maps:
-        # lab: 24_5
-        # new bark town: 24_4
-        # new bark house bottom right: 24_9
-        # new bark house bottom left: 24_8
-        # home: 24_6
-        # home upstairs: 24_7
-        # route 29: 24_3
-        if not self.headless:
-            if self.step_count % 200 == 0:
-                arr_dict = {}
-                for k in self.seen_coords.keys():
-                    x, y, m = re.findall(r'[0-9_]+', k)
-                    if m not in arr_dict.keys():
-                        arr_dict[m] = np.ones((100, 100))
-                    arr_dict[m][int(y), int(x)] = 0
-                from matplotlib import pyplot as plt
-                (self.s_path / Path("maps")).mkdir(exist_ok=True)
-                for m, img in arr_dict.items():
-                    crop = True
-
-                    def crop_image(image):
-                        if not crop:
-                            return image
-                        mask = image != 1
-                        mask0, mask1 = np.any(mask, 0), np.any(mask, 1)
-                        return image[np.ix_(mask1, mask0)]
-
-                    plt.imshow(crop_image(img), cmap="gray")
-                    plt.savefig(self.s_path / Path("maps") / Path(f"{m}.png"))

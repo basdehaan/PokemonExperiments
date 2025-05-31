@@ -1,11 +1,15 @@
+import re
+from pathlib import Path
+import numpy as np
 from training.pokemon_env import PokeGymEnv
 
 
 class RedGymEnv(PokeGymEnv):
     gb_path = '../PokemonRed.gb'
+    simple_name = "red"
 
-    _map_position_x = 0xC106
-    _map_position_y = 0xC104
+    _map_position_x = 0xD362
+    _map_position_y = 0xD361
     _map_bank_no = 0xD35D
     _map_map_no = 0xD35E
 

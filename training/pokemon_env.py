@@ -1,4 +1,5 @@
 import random
+import re
 import sys
 import uuid
 from math import floor
@@ -39,8 +40,6 @@ class PokeGymEnv(Env):
         self.save_video = config['save_video']
         self.fast_video = config['fast_video']
         self.video_interval = 256 * self.act_freq
-        self.downsample_factor = 2
-        self.frame_stacks = 1
         self.explore_weight = 1 if 'explore_weight' not in config else config['explore_weight']
         self.explore_method = 'HYBRID' if 'explore_method' not in config else config['explore_method']
         self.noise = 0 if 'noise' not in config else config['noise']
@@ -69,35 +68,27 @@ class PokeGymEnv(Env):
         if self.extra_buttons:
             self.valid_actions.extend([
                 WindowEvent.PRESS_BUTTON_START,
-                WindowEvent.PASS
+                WindowEvent.PRESS_BUTTON_SELECT
             ])
 
-        self.release_arrow = [
+        self.release_button = [
             WindowEvent.RELEASE_ARROW_DOWN,
             WindowEvent.RELEASE_ARROW_LEFT,
             WindowEvent.RELEASE_ARROW_RIGHT,
-            WindowEvent.RELEASE_ARROW_UP
-        ]
-
-        self.release_button = [
+            WindowEvent.RELEASE_ARROW_UP,
             WindowEvent.RELEASE_BUTTON_A,
             WindowEvent.RELEASE_BUTTON_B
         ]
 
         pixel_factor = 0.5
         self.output_shape = (int(144 * pixel_factor), int(160 * pixel_factor), 3)
-        self.mem_padding = 1
-        self.memory_height = 4
+        self.mem_padding = 0
+        self.memory_height = 0
         self.col_steps = 16
-        self.output_full = (
-            self.output_shape[0] * self.frame_stacks + 2 * (self.mem_padding + self.memory_height),
-            self.output_shape[1],
-            self.output_shape[2]
-        )
 
         # Set these in ALL subclasses
         self.action_space = spaces.Discrete(len(self.valid_actions))
-        self.observation_space = spaces.Box(low=0, high=255, shape=self.output_full, dtype=np.uint8)
+        self.observation_space = spaces.Box(low=0, high=255, shape=self.output_shape, dtype=np.uint8)
 
         head = 'headless' if config['headless'] else 'SDL2'
 
@@ -152,12 +143,12 @@ class PokeGymEnv(Env):
 
         self.reload_roll = self.reload_roll + 1
 
-        self.recent_memory = np.zeros((self.output_shape[1] * self.memory_height, 3), dtype=np.uint8)
-
-        self.recent_frames = np.zeros(
-            (self.frame_stacks, self.output_shape[0],
-             self.output_shape[1], self.output_shape[2]),
-            dtype=np.uint8)
+        # self.recent_memory = np.zeros((self.output_shape[1] * self.memory_height, 3), dtype=np.uint8)
+        #
+        # self.recent_frames = np.zeros(
+        #     (self.frame_stacks, self.output_shape[0],
+        #      self.output_shape[1], self.output_shape[2]),
+        #     dtype=np.uint8)
 
         self.agent_stats = []
 
@@ -168,7 +159,7 @@ class PokeGymEnv(Env):
             model_name = Path(f'model_reset_{self.reset_count}_id{self.instance_id}').with_suffix('.mp4')
             self.full_frame_writer = media.VideoWriter(base_dir / full_name, (144, 160), fps=60)
             self.full_frame_writer.__enter__()
-            self.model_frame_writer = media.VideoWriter(base_dir / model_name, self.output_full[:2], fps=60)
+            self.model_frame_writer = media.VideoWriter(base_dir / model_name, self.output_shape[:2], fps=60)
             self.model_frame_writer.__enter__()
 
         self.levels_satisfied = False
@@ -178,8 +169,7 @@ class PokeGymEnv(Env):
         self.max_level_rew = 0
         self.last_health = 1
         self.last_opp_health = 1
-        self.total_healing_reward = 0
-        self.total_damage_reward = 0
+        self.latest_healing_reward = 0
         self.died_count = 0
         self.step_count = 0
         self.progress_reward = self.get_game_state_reward()
@@ -215,21 +205,21 @@ class PokeGymEnv(Env):
         # game_pixels_render = np.dot(game_pixels_render[...,:3], [0.299, 0.587, 0.114])
         if reduce_res:
             game_pixels_render = (255 * resize(game_pixels_render, self.output_shape)).astype(np.uint8)
-            if update_mem:
-                self.recent_frames[0] = game_pixels_render
-            if add_memory:
-                pad = np.zeros(
-                    shape=(self.mem_padding, self.output_shape[1], 3),
-                    dtype=np.uint8)
-                game_pixels_render = np.concatenate(
-                    (
-                        self.create_exploration_memory(),
-                        pad,
-                        self.create_recent_memory(),
-                        pad,
-                        rearrange(self.recent_frames, 'f h w c -> (f h) w c')
-                    ),
-                    axis=0)
+            # if update_mem:
+            #     self.recent_frames[0] = game_pixels_render
+            # if add_memory:
+            #     pad = np.zeros(
+            #         shape=(self.mem_padding, self.output_shape[1], 3),
+            #         dtype=np.uint8)
+            #     game_pixels_render = np.concatenate(
+            #         (
+            #             self.create_exploration_memory(),
+            #             pad,
+            #             self.create_recent_memory(),
+            #             pad,
+            #             rearrange(self.recent_frames, 'f h w c -> (f h) w c')
+            #         ),
+            #         axis=0)
         return game_pixels_render
 
     def step(self, action):
@@ -237,7 +227,7 @@ class PokeGymEnv(Env):
         self.run_action_on_emulator(action)
         self.append_agent_stats(action)
 
-        self.recent_frames = np.roll(self.recent_frames, 1, axis=0)
+        # self.recent_frames = np.roll(self.recent_frames, 1, axis=0)
         obs_memory = self.render()
 
         # trim off memory from frame for knn index
@@ -256,10 +246,10 @@ class PokeGymEnv(Env):
         self.last_health = self.read_hp_fraction()
 
         # shift over short term reward memory
-        self.recent_memory = np.roll(self.recent_memory, 3)
-        self.recent_memory[0, 0] = min(new_prog[0] * 64, 255)
-        self.recent_memory[0, 1] = min(new_prog[1] * 64, 255)
-        self.recent_memory[0, 2] = min(new_prog[2] * 128, 255)
+        # self.recent_memory = np.roll(self.recent_memory, 3)
+        # self.recent_memory[0, 0] = min(new_prog[0] * 64, 255)
+        # self.recent_memory[0, 1] = min(new_prog[1] * 64, 255)
+        # self.recent_memory[0, 2] = min(new_prog[2] * 128, 255)
 
         step_limit_reached = self.check_if_done()
 
@@ -278,12 +268,9 @@ class PokeGymEnv(Env):
         for i in range(self.act_freq):
             # release action, so they are stateless
             if i == 16:  # was 8, but then the player just turns, but doesn't step
-                if action < 4:
-                    # release arrow
-                    self.pyboy.send_input(self.release_arrow[action])
-                if 3 < action < 6:
-                    # release button
-                    self.pyboy.send_input(self.release_button[action - 4])
+                if action < 6:
+                    # release
+                    self.pyboy.send_input(self.release_button[action])
                 if self.valid_actions[action] == WindowEvent.PRESS_BUTTON_START:
                     self.pyboy.send_input(WindowEvent.RELEASE_BUTTON_START)
             if self.save_video and not self.fast_video:
@@ -309,7 +296,7 @@ class PokeGymEnv(Env):
             'pcount': self.read_m(self._party_total), 'levels': levels, 'ptypes': self.read_party(),
             'hp': self.read_hp_fraction(),
             'deaths': self.died_count, 'badge': self.get_badges(),
-            'event': self.progress_reward['event'], 'healr': self.total_healing_reward
+            'event': self.progress_reward['event'], 'healr': self.latest_healing_reward
         })
 
     def update_frame_knn_index(self, frame_vec):
@@ -341,6 +328,32 @@ class PokeGymEnv(Env):
             with open(init_state_file, "bw") as f:
                 self.pyboy.save_state(f)
 
+        if not self.headless:
+            folder_name = f"maps_{self.simple_name}"
+            folder = self.s_path / Path(folder_name)
+            folder.mkdir(exist_ok=True)
+            if self.step_count % 200 == 0:
+                arr_dict = {}
+                for k in self.seen_coords.keys():
+                    x, y, m = re.findall(r'[0-9_]+', k)
+                    if m not in arr_dict.keys():
+                        arr_dict[m] = np.ones((100, 100))
+                    arr_dict[m][int(y), int(x)] = 0
+                from matplotlib import pyplot as plt
+                for m, img in arr_dict.items():
+                    crop = True
+
+                    def crop_image(image):
+                        if not crop:
+                            return image
+                        mask = image != 1
+                        mask0, mask1 = np.any(mask, 0), np.any(mask, 1)
+                        return image[np.ix_(mask1, mask0)]
+
+                    plt.imshow(crop_image(img), cmap="gray")
+                    plt.savefig(folder / Path(f"{m}.png"))
+
+
     def update_reward(self):
         # compute reward
         old_prog = self.group_rewards()
@@ -364,49 +377,49 @@ class PokeGymEnv(Env):
                 self.read_hp_fraction() * 100,
                 prog['explore'] * 150 / (self.explore_weight * self.reward_scale))
 
-    def create_exploration_memory(self):
-        w = self.output_shape[1]
-        h = self.memory_height
+    # def create_exploration_memory(self):
+    #     w = self.output_shape[1]
+    #     h = self.memory_height
+    #
+    #     def make_reward_channel(r_val):
+    #         col_steps = self.col_steps
+    #         max_r_val = (w - 1) * h * col_steps
+    #         # truncate progress bar. if hitting this
+    #         # you should scale down the reward in group_rewards!
+    #         r_val = min(r_val, max_r_val)
+    #         row = floor(r_val / (h * col_steps))
+    #         memory = np.zeros(shape=(h, w), dtype=np.uint8)
+    #         memory[:, :row] = 255
+    #         row_covered = row * h * col_steps
+    #         col = floor((r_val - row_covered) / col_steps)
+    #         memory[:col, row] = 255
+    #         col_covered = col * col_steps
+    #         last_pixel = floor(r_val - row_covered - col_covered)
+    #         memory[col, row] = last_pixel * (255 // col_steps)
+    #         return memory
+    #
+    #     level, hp, explore = self.group_rewards()
+    #     full_memory = np.stack((
+    #         make_reward_channel(level),
+    #         make_reward_channel(hp),
+    #         make_reward_channel(explore)
+    #     ), axis=-1)
+    #
+    #     if self.get_badges() > 0:
+    #         full_memory[:, -1, :] = 255
+    #
+    #     return full_memory
 
-        def make_reward_channel(r_val):
-            col_steps = self.col_steps
-            max_r_val = (w - 1) * h * col_steps
-            # truncate progress bar. if hitting this
-            # you should scale down the reward in group_rewards!
-            r_val = min(r_val, max_r_val)
-            row = floor(r_val / (h * col_steps))
-            memory = np.zeros(shape=(h, w), dtype=np.uint8)
-            memory[:, :row] = 255
-            row_covered = row * h * col_steps
-            col = floor((r_val - row_covered) / col_steps)
-            memory[:col, row] = 255
-            col_covered = col * col_steps
-            last_pixel = floor(r_val - row_covered - col_covered)
-            memory[col, row] = last_pixel * (255 // col_steps)
-            return memory
-
-        level, hp, explore = self.group_rewards()
-        full_memory = np.stack((
-            make_reward_channel(level),
-            make_reward_channel(hp),
-            make_reward_channel(explore)
-        ), axis=-1)
-
-        if self.get_badges() > 0:
-            full_memory[:, -1, :] = 255
-
-        return full_memory
-
-    def create_recent_memory(self):
-        return rearrange(
-            self.recent_memory,
-            '(w h) c -> h w c',
-            h=self.memory_height)
+    # def create_recent_memory(self):
+    #     return rearrange(
+    #         self.recent_memory,
+    #         '(w h) c -> h w c',
+    #         h=self.memory_height)
 
     def check_if_done(self):
         if self.early_stopping:
             done = False
-            if self.step_count > 128 and self.recent_memory.sum() < (255 * 1):
+            if self.step_count > 128 and self.total_reward < 30:
                 done = True
         else:
             done = self.step_count >= self.max_steps
@@ -510,6 +523,18 @@ class PokeGymEnv(Env):
     def get_maps_explored(self):
         return len(self.seen_maps) if len(self.seen_maps) < 8 else len(self.seen_maps) * 2
 
+    def multiply_map_steps(self):
+        total = 1
+        arr_dict = {}
+        for k in self.seen_coords.keys():
+            x, y, m = re.findall(r'[0-9_]+', k)
+            if m not in arr_dict.keys():
+                arr_dict[m] = 0
+            arr_dict[m] = arr_dict[m] + 1
+        for v in arr_dict.values():
+            total *= v
+        return total - 1
+
     def read_party(self):
         return [self.read_m(addr) for addr in self._party_pokemon]
 
@@ -518,7 +543,7 @@ class PokeGymEnv(Env):
         if cur_health > self.last_health:
             if self.last_health > 0:
                 heal_amount = cur_health - self.last_health
-                self.total_healing_reward += heal_amount
+                self.latest_healing_reward = heal_amount
             else:
                 self.died_count += 1
 
@@ -528,10 +553,10 @@ class PokeGymEnv(Env):
             if curr_opp_health <= self.last_opp_health:
                 rew = self.last_opp_health - curr_opp_health
                 self.last_opp_health = curr_opp_health
-                self.total_damage_reward += rew
+                return rew
             else:
                 self.last_opp_health = curr_opp_health
-        return self.total_damage_reward
+        return 0
 
     def get_all_events_reward(self):
         return max(sum([self.bit_count(self.read_bit(i, 1)) for i in self._event_flags]), 0)
@@ -541,12 +566,12 @@ class PokeGymEnv(Env):
         # https://github.com/pret/pokered/blob/91dc3c9f9c8fd529bb6e8307b58b96efa0bec67e/constants/event_constants.asm
         state_scores = {
             'event': self.reward_scale * self.update_max_event_reward(),
-            'level': self.reward_scale * self.get_levels_reward() * 2,
+            'level': self.reward_scale * self.get_levels_reward() * 10,
             'xp': self.reward_scale * self.get_xp_reward(),
             'items': self.reward_scale * self.get_items_reward(),
-            'heal': self.reward_scale * self.total_healing_reward,
+            'heal': self.reward_scale * self.latest_healing_reward,
             'op_lvl': self.reward_scale * self.update_max_op_level(),
-            'op_dmg': self.reward_scale * self.get_damage_reward() * 2,
+            'op_dmg': self.reward_scale * self.get_damage_reward() * 10,
             # 'dead': self.reward_scale * -1.0 * self.died_count,
             'badge': self.reward_scale * self.get_badges() * 5,
             # 'hms': self.reward_scale * self.get_hms() * 5,
@@ -554,8 +579,9 @@ class PokeGymEnv(Env):
             'seen_count': self.reward_scale * self.get_seen_count(),
             'caught_count': self.reward_scale * self.get_caught_count(),
             'explore': self.reward_scale * self.explore_weight * self.get_explore_reward() * 2,
-            'map_explore': self.reward_scale * self.get_maps_explored() * 5,
-            'neg_steps': -0.005
+            'map_explore': self.reward_scale * self.get_maps_explored() * 10,
+            # 'overvalue_new_maps': self.multiply_map_steps() * 0.01,
+            'neg_steps': -0.01
         }
 
         return state_scores
