@@ -26,9 +26,9 @@ class PokeGymEnv(Env):
         self.s_path = config['session_path']
         self.save_final_state = config['save_final_state']
         self.print_rewards = config['print_rewards']
-        self.vec_dim = 4320  # 1000
         self.headless = config['headless']
-        self.num_elements = 20000  # max
+        self.knn_vec_dim = 4320  # 1000
+        self.knn_num_elements = 20000  # max
         self.load_once = False if 'load_once' not in config else config['load_once']
         self.random_reload = 0 if 'random_reload' not in config else config['random_reload']
         self.rolling_reload = -1 if 'rolling_reload' not in config else config['rolling_reload']
@@ -185,10 +185,10 @@ class PokeGymEnv(Env):
 
     def init_knn(self):
         # Declaring index
-        self.knn_index = hnswlib.Index(space='l2', dim=self.vec_dim)  # possible options are l2, cosine or ip
+        self.knn_index = hnswlib.Index(space='l2', dim=self.knn_vec_dim)  # possible options are l2, cosine or ip
         # Initing index - the maximum number of elements should be known beforehand
         self.knn_index.init_index(
-            max_elements=self.num_elements, ef_construction=100, M=16)
+            max_elements=self.knn_num_elements, ef_construction=100, M=16)
 
     def init_map_mem(self):
         self.seen_coords = {}
@@ -328,30 +328,30 @@ class PokeGymEnv(Env):
             with open(init_state_file, "bw") as f:
                 self.pyboy.save_state(f)
 
-        if not self.headless:
-            folder_name = f"maps_{self.simple_name}"
-            folder = self.s_path / Path(folder_name)
-            folder.mkdir(exist_ok=True)
-            if self.step_count % 200 == 0:
-                arr_dict = {}
-                for k in self.seen_coords.keys():
-                    x, y, m = re.findall(r'[0-9_]+', k)
-                    if m not in arr_dict.keys():
-                        arr_dict[m] = np.ones((100, 100))
-                    arr_dict[m][int(y), int(x)] = 0
-                from matplotlib import pyplot as plt
-                for m, img in arr_dict.items():
-                    crop = True
-
-                    def crop_image(image):
-                        if not crop:
-                            return image
-                        mask = image != 1
-                        mask0, mask1 = np.any(mask, 0), np.any(mask, 1)
-                        return image[np.ix_(mask1, mask0)]
-
-                    plt.imshow(crop_image(img), cmap="gray")
-                    plt.savefig(folder / Path(f"{m}.png"))
+        # if not self.headless:
+        #     folder_name = f"maps_{self.simple_name}"
+        #     folder = self.s_path / Path(folder_name)
+        #     folder.mkdir(exist_ok=True)
+        #     if self.step_count % 999 == 0:
+        #         arr_dict = {}
+        #         for k in self.seen_coords.keys():
+        #             x, y, m = re.findall(r'[0-9_]+', k)
+        #             if m not in arr_dict.keys():
+        #                 arr_dict[m] = np.ones((100, 100))
+        #             arr_dict[m][int(y), int(x)] = 0
+        #         from matplotlib import pyplot as plt
+        #         for m, img in arr_dict.items():
+        #             crop = True
+        #
+        #             def crop_image(image):
+        #                 if not crop:
+        #                     return image
+        #                 mask = image != 1
+        #                 mask0, mask1 = np.any(mask, 0), np.any(mask, 1)
+        #                 return image[np.ix_(mask1, mask0)]
+        #
+        #             plt.imshow(crop_image(img), cmap="gray")
+        #             plt.savefig(folder / Path(f"{m}.png"))
 
 
     def update_reward(self):
