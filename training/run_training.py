@@ -100,7 +100,7 @@ if __name__ == '__main__':
 
     # policy model shape
     policy_kwargs = dict(
-        net_arch=[dict(pi=[1024, 1024, 256, 128, 64], vf=[1024, 1024, 256, 128, 64])]
+        net_arch=dict(pi=[1024, 1024, 256, 128, 64], vf=[1024, 1024, 256, 128, 64])
     )
     # agent = PPO('CnnPolicy', env, n_steps=ep_length, batch_size=batch_size, n_epochs=n_epochs,learning_rate=learning_rate, policy_kwargs=policy_kwargs)
     agent = A2C('CnnPolicy', env, n_steps=ep_length, policy_kwargs=policy_kwargs)

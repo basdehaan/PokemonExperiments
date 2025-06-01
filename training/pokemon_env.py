@@ -579,7 +579,7 @@ class PokeGymEnv(Env):
             'seen_count': self.reward_scale * self.get_seen_count(),
             'caught_count': self.reward_scale * self.get_caught_count(),
             'explore': self.reward_scale * self.explore_weight * self.get_explore_reward() * 2,
-            'map_explore': self.reward_scale * self.get_maps_explored() * 10,
+            # 'map_explore': self.reward_scale * self.get_maps_explored() * 10,
             # 'overvalue_new_maps': self.multiply_map_steps() * 0.01,
             'neg_steps': -0.01
         }
