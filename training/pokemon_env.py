@@ -6,7 +6,6 @@ from math import floor
 from pathlib import Path
 
 import numpy as np
-from einops import rearrange
 import matplotlib.pyplot as plt
 from skimage.transform import resize
 from pyboy import PyBoy
@@ -546,6 +545,8 @@ class PokeGymEnv(Env):
                 self.latest_healing_reward = heal_amount
             else:
                 self.died_count += 1
+        else:
+            self.latest_healing_reward = 0
 
     def get_damage_reward(self):
         curr_opp_health = self.read_opp_hp_fraction()

@@ -40,8 +40,8 @@ if __name__ == '__main__':
 
     ep_length = 1000
     reset_length = 20000
-    num_cpu = 8
-    visible_cpu = 8
+    num_emulators = 8
+    visible_emulators = 8
     episodes = 2000
 
     learning_rate = 0.0007
@@ -58,7 +58,7 @@ if __name__ == '__main__':
 
     env_config = {
         'headless': True, 'save_final_state': False, 'early_stop': False,
-        'action_freq': 48, 'load_once': True, 'random_reload': 0, 'rolling_reload': int(reset_length/ep_length),
+        'action_freq': 48, 'load_once': True, 'random_reload': 0, 'rolling_reload': -1, #int(reset_length/ep_length),
         'max_steps': ep_length,
         'save_stats_and_runs': False,
         'print_rewards': False, 'save_video': False, 'fast_video': True, 'session_path': sess_path,
@@ -74,7 +74,7 @@ if __name__ == '__main__':
             _env['class'] = random.choice(types)
         else:
             _env['class'] = types[i % len(types)]
-        if i < len(set(types)) or i < visible_cpu:
+        if i < len(set(types)) or i < visible_emulators:
             # visible windows
             _env['headless'] = False
             _env['random_reload'] = 0
@@ -84,7 +84,7 @@ if __name__ == '__main__':
 
 
     env = SubprocVecEnv([make_env(i, get_env_config_for_i(i)) for i in
-                         range(num_cpu)], start_method="spawn")
+                         range(num_emulators)], start_method="spawn")
 
     checkpoint_callback = CheckpointCallback(save_freq=ep_length, save_path=str(sess_path),
                                              name_prefix='poke')
@@ -118,20 +118,20 @@ if __name__ == '__main__':
                 agent.n_epochs = n_epochs
                 agent.learning_rate = learning_rate
                 agent.rollout_buffer.buffer_size = ep_length
-                agent.rollout_buffer.n_envs = num_cpu
+                agent.rollout_buffer.n_envs = num_emulators
                 agent.rollout_buffer.reset()
             elif type(agent) is A2C:
                 agent = A2C.load(file_name, env=env)
                 agent.n_steps = ep_length
                 agent.n_epochs = n_epochs
                 agent.rollout_buffer.buffer_size = ep_length
-                agent.rollout_buffer.n_envs = num_cpu
+                agent.rollout_buffer.n_envs = num_emulators
                 agent.rollout_buffer.reset()
 
 
     for i in range(episodes):
-        agent.learn(total_timesteps=ep_length * num_cpu,
+        agent.learn(total_timesteps=ep_length * num_emulators,
                     callback=checkpoint_callback,
                     reset_num_timesteps=False,
                     progress_bar=True,
-                    log_interval=num_cpu)
+                    log_interval=num_emulators)
