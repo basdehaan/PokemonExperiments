@@ -24,11 +24,12 @@ pyboy.logger.log_level("DISABLE")
 def make_env(i, env_conf, seed=0):
     if i != 0 or seed == 0:
         seed = random.randint(0, 10000)
-
-    assert env_conf['class'] is not None
+    env_conf_copy = env_conf.copy()
+    env_conf_copy['seed'] = seed
+    assert env_conf_copy['class'] is not None
 
     def _init():
-        _env = env_conf['class'](env_conf)
+        _env = env_conf_copy['class'](env_conf_copy)
         _env.reset(seed=(seed + i))
         return _env
 
@@ -38,14 +39,15 @@ def make_env(i, env_conf, seed=0):
 
 if __name__ == '__main__':
 
-    ep_length = 1000
-    reset_length = 20000
+    ep_length = 100
+    reset_length = 100 * ep_length
     num_emulators = 8
-    visible_emulators = 8
-    episodes = 2000
+    visible_emulators = 2
+    episodes = 10_000
 
-    learning_rate = 0.0007
-    n_epochs = 20
+    learning_rate_min = 0.0001
+    learning_rate_max = 0.002
+    n_epochs = 1
     batch_size = 64
 
     types = [
@@ -57,13 +59,13 @@ if __name__ == '__main__':
     print(sess_path)
 
     env_config = {
-        'headless': True, 'save_final_state': False, 'early_stop': False,
-        'action_freq': 48, 'load_once': True, 'random_reload': 0, 'rolling_reload': -1, #int(reset_length/ep_length),
+        'headless': True, 'save_final_state': True, 'early_stop': False,
+        'action_freq': 80, 'load_once': True, 'random_reload': 0, 'rolling_reload': int(reset_length / ep_length),
         'max_steps': ep_length,
-        'save_stats_and_runs': False,
+        'save_stats_and_runs': False, 'random_init_state': True,
         'print_rewards': False, 'save_video': False, 'fast_video': True, 'session_path': sess_path,
-        'debug': False, 'sim_frame_dist': 3_00_000.0,
-        'explore_method': 'STEPS', 'extra_buttons': False, 'explore_weight': 1,
+        'debug': False, 'sim_frame_dist': 500_000.0,
+        'explore_method': 'HYBRID', 'extra_buttons': False, 'explore_weight': 1,
         'noise': 0.0
     }
 
@@ -74,16 +76,18 @@ if __name__ == '__main__':
             _env['class'] = random.choice(types)
         else:
             _env['class'] = types[i % len(types)]
-        if i < len(set(types)) or i < visible_emulators:
+        # if i < len(set(types)) or i < visible_emulators:
+        if i < visible_emulators:
             # visible windows
             _env['headless'] = False
             _env['random_reload'] = 0
             # _env['rolling_reload'] = -1
             _env['class'] = types[i % len(types)]
+        _env['class_indicator'] = types.index(_env['class']) / len(set(types))
         return _env
 
 
-    env = SubprocVecEnv([make_env(i, get_env_config_for_i(i)) for i in
+    env = SubprocVecEnv([make_env(i, get_env_config_for_i(i), seed=1234) for i in
                          range(num_emulators)], start_method="spawn")
 
     checkpoint_callback = CheckpointCallback(save_freq=ep_length, save_path=str(sess_path),
@@ -100,10 +104,12 @@ if __name__ == '__main__':
 
     # policy model shape
     policy_kwargs = dict(
-        net_arch=dict(pi=[1024, 1024, 256, 128, 64], vf=[1024, 1024, 256, 128, 64])
+        # net_arch=[1024, 256, 128, 64]
     )
-    # agent = PPO('CnnPolicy', env, n_steps=ep_length, batch_size=batch_size, n_epochs=n_epochs,learning_rate=learning_rate, policy_kwargs=policy_kwargs)
-    agent = A2C('CnnPolicy', env, n_steps=ep_length, policy_kwargs=policy_kwargs)
+    gamma = 0.9926
+
+    # agent = PPO('CnnPolicy', env, n_steps=ep_length, batch_size=batch_size, n_epochs=n_epochs,learning_rate=learning_rate, policy_kwargs=policy_kwargs, gamma=gamma)
+    agent = A2C('CnnPolicy', env, n_steps=ep_length, policy_kwargs=policy_kwargs, gamma=gamma)
 
     if len(files) > 0:
         file_name = f'{search_folder}/{files[0]}'
@@ -112,24 +118,24 @@ if __name__ == '__main__':
             print('loading checkpoint', file_name)
             print()
             if type(agent) is PPO:
-                agent = PPO.load(file_name, env=env)
+                agent = PPO.load(file_name, env=env, gamma=gamma)
                 agent.batch_size = batch_size
                 agent.n_steps = ep_length
                 agent.n_epochs = n_epochs
-                agent.learning_rate = learning_rate
+                agent.learning_rate = learning_rate_min + (random.random() * (learning_rate_max - learning_rate_min))
                 agent.rollout_buffer.buffer_size = ep_length
                 agent.rollout_buffer.n_envs = num_emulators
                 agent.rollout_buffer.reset()
             elif type(agent) is A2C:
-                agent = A2C.load(file_name, env=env)
+                agent = A2C.load(file_name, env=env, gamma=gamma)
                 agent.n_steps = ep_length
                 agent.n_epochs = n_epochs
                 agent.rollout_buffer.buffer_size = ep_length
                 agent.rollout_buffer.n_envs = num_emulators
                 agent.rollout_buffer.reset()
 
-
     for i in range(episodes):
+        print(i + 1, "/", episodes)
         agent.learn(total_timesteps=ep_length * num_emulators,
                     callback=checkpoint_callback,
                     reset_num_timesteps=False,
