@@ -89,18 +89,19 @@ class PokeGymEnv(Env):
         ]
 
         pixel_factor = 0.8
-        self.mem_padding = 10
         self.render_output_shape = (int(144 * pixel_factor), int(160 * pixel_factor), 3)
-        self.model_input_shape = (
-            self.render_output_shape[0] + self.mem_padding * 3, self.render_output_shape[1],
-            self.render_output_shape[2]
-        )
-
         self.knn_vec_dim = self.render_output_shape[0] * self.render_output_shape[1] * self.render_output_shape[2]
 
         # Set these in ALL subclasses
         self.action_space = spaces.Discrete(len(self.valid_actions))
-        self.observation_space = spaces.Box(low=0, high=255, shape=self.model_input_shape, dtype=np.uint8)
+        self.observation_space = spaces.Dict(
+            {
+                "screen_image": spaces.Box(low=0, high=255, shape=self.render_output_shape, dtype=np.uint8),
+                "version": spaces.Discrete(10),
+                "party_status": spaces.Box(low=0, high=1.0, shape=(6,), dtype=np.float64),
+                "battle_type": spaces.Discrete(3),
+            }
+        )
 
         head = 'headless' if config['headless'] else 'SDL2'
 
@@ -188,7 +189,7 @@ class PokeGymEnv(Env):
             model_name = Path(f'model_reset_{self.reset_count}_id{self.instance_id}').with_suffix('.mp4')
             self.full_frame_writer = media.VideoWriter(base_dir / full_name, (144, 160), fps=60)
             self.full_frame_writer.__enter__()
-            self.model_frame_writer = media.VideoWriter(base_dir / model_name, self.output_shape[:2], fps=60)
+            self.model_frame_writer = media.VideoWriter(base_dir / model_name, self.render_output_shape[:2], fps=60)
             self.model_frame_writer.__enter__()
 
         self.levels_satisfied = False
@@ -225,7 +226,7 @@ class PokeGymEnv(Env):
         self.seen_coords = {}
         self.seen_maps = set([])
 
-    def render(self, reduce_res=True, add_memory=True, update_mem=True):
+    def render(self, reduce_res=True, update_mem=True):
         game_pixels_render = self.screen.screen_ndarray()  # (144, 160, 3)
         if self.noise:
             noise = np.random.normal(0, 128 * self.noise, size=game_pixels_render.shape)
@@ -236,47 +237,20 @@ class PokeGymEnv(Env):
         # game_pixels_render = np.dot(game_pixels_render[...,:3], [0.299, 0.587, 0.114])
         if reduce_res:
             game_pixels_render = (255 * resize(game_pixels_render, self.render_output_shape)).astype(np.uint8)
-        if add_memory:
-            pokemon_indicator = self.read_party_hp()
-            # array len 6
-            pokemon_indicator = (np.reshape(pokemon_indicator, newshape=(1, 6)) * 255)
-            # print(pokemon_indicator.shape) # (1,6)
-            pokemon_indicator = np.repeat(pokemon_indicator, self.mem_padding, axis=0)
-            # print(pokemon_indicator.shape) # (10, 6)
-            pokemon_indicator = np.repeat(pokemon_indicator, int(game_pixels_render.shape[1] / 6), axis=1)
-            # print(pokemon_indicator.shape) # (10,80-ish)
-            pokemon_indicator = np.concatenate((pokemon_indicator, np.zeros(
-                (pokemon_indicator.shape[0], game_pixels_render.shape[1] - pokemon_indicator.shape[1]))), axis=1)
-            # print(pokemon_indicator.shape) # (10,80)
-            pokemon_indicator = np.reshape(pokemon_indicator, pokemon_indicator.shape + (1,))
-            # print(pokemon_indicator.shape) # (10,80,1)
-            pokemon_indicator = np.repeat(pokemon_indicator, game_pixels_render.shape[2], axis=2)
-            # print(pokemon_indicator.shape) # (10,80,3)
-            pokemon_indicator = pokemon_indicator.astype(np.uint8)
-            battle_type = self.read_battle_type()
-            if battle_type == 0:
-                battle_indicator = np.zeros(
-                    shape=(self.mem_padding, game_pixels_render.shape[1], game_pixels_render.shape[2]),
-                    dtype=np.uint8)
-            else:
-                battle_indicator = np.full(fill_value=255,
-                                           shape=(
-                                               self.mem_padding, game_pixels_render.shape[1],
-                                               game_pixels_render.shape[2]),
-                                           dtype=np.uint8)
-            version_indicator = np.full(fill_value=int(self.class_indicator * 255),
-                                        shape=(
-                                            self.mem_padding, game_pixels_render.shape[1], game_pixels_render.shape[2]),
-                                        dtype=np.uint8)
-            game_pixels_render = np.concatenate(
-                (
-                    pokemon_indicator,
-                    version_indicator,
-                    battle_indicator,
-                    game_pixels_render,
-                ),
-                axis=0, dtype=np.uint8)
-        return game_pixels_render
+
+        pokemon_indicator = self.read_party_hp()
+        battle_type = self.read_battle_type()
+
+        obs = {
+            "screen_image": game_pixels_render,
+            "version": self.version_indicator,
+            "party_status": pokemon_indicator,
+            "battle_type": int(battle_type),
+        }
+
+        # assert self.observation_space.contains(obs)
+
+        return obs
 
     def step(self, action):
 
@@ -287,12 +261,9 @@ class PokeGymEnv(Env):
         obs_memory = self.render()
 
         if self.explore_method in ["SCREEN", "HYBRID"]:
-            # trim off memory from frame for knn index
-            frame_start = self.mem_padding
-            obs_flat = obs_memory[frame_start:frame_start + self.render_output_shape[0], ...].flatten().astype(
-                np.float32)
-
+            obs_flat = obs_memory.get("screen_image").flatten().astype(np.float32)
             self.update_frame_knn_index(obs_flat)
+
         self.update_seen_coords()
 
         self.update_heal_reward()
@@ -303,7 +274,7 @@ class PokeGymEnv(Env):
 
         step_limit_reached = self.check_if_done()
 
-        self.save_and_print_info(step_limit_reached, obs_memory)
+        self.save_and_print_info(step_limit_reached, obs_memory.get("screen"))
 
         self.step_count += 1
 
@@ -335,8 +306,8 @@ class PokeGymEnv(Env):
             self.add_video_frame()
 
     def add_video_frame(self):
-        self.full_frame_writer.add_image(self.render(reduce_res=False, add_memory=False, update_mem=False))
-        self.model_frame_writer.add_image(self.render(reduce_res=True, add_memory=True, update_mem=False))
+        self.full_frame_writer.add_image(self.render(reduce_res=False, update_mem=False))
+        self.model_frame_writer.add_image(self.render(reduce_res=True, update_mem=False))
 
     def update_direction_reward(self, action):
         battle_type = self.read_battle_type()
@@ -383,7 +354,7 @@ class PokeGymEnv(Env):
         check_stuck_len = min(300, self.max_steps)
         self.check_stuck_mem = self.check_stuck_mem[-check_stuck_len:]
         self.not_stuck_reward = len(list(set(self.check_stuck_mem))) / check_stuck_len
-        self.not_stuck_reward_total += self.not_stuck_reward - .05
+        self.not_stuck_reward_total += self.not_stuck_reward - .1
         if (battle_type == 0  # TODO: fix for when menu is included in gameplay
                 and self.seen_coords is not None
                 and len(self.seen_coords) > 10  # to make sure it gets through the intro
@@ -420,31 +391,6 @@ class PokeGymEnv(Env):
             init_state_file = self.gb_path + ".state"
             with open(init_state_file, "bw") as f:
                 self.pyboy.save_state(f)
-
-        # if not self.headless:
-        #     folder_name = f"maps_{self.simple_name}"
-        #     folder = self.s_path / Path(folder_name)
-        #     folder.mkdir(exist_ok=True)
-        #     if self.step_count % 999 == 0:
-        #         arr_dict = {}
-        #         for k in self.seen_coords.keys():
-        #             x, y, m = re.findall(r'[0-9_]+', k)
-        #             if m not in arr_dict.keys():
-        #                 arr_dict[m] = np.ones((100, 100))
-        #             arr_dict[m][int(y), int(x)] = 0
-        #         from matplotlib import pyplot as plt
-        #         for m, img in arr_dict.items():
-        #             crop = True
-        #
-        #             def crop_image(image):
-        #                 if not crop:
-        #                     return image
-        #                 mask = image != 1
-        #                 mask0, mask1 = np.any(mask, 0), np.any(mask, 1)
-        #                 return image[np.ix_(mask1, mask0)]
-        #
-        #             plt.imshow(crop_image(img), cmap="gray")
-        #             plt.savefig(folder / Path(f"{m}.png"))
 
     def update_reward(self):
         # compute reward
@@ -626,9 +572,10 @@ class PokeGymEnv(Env):
     def save_screenshot(self, name):
         ss_dir = self.s_path / Path('screenshots')
         ss_dir.mkdir(exist_ok=True)
+        image = self.render(reduce_res=False).get("screen_image")
         plt.imsave(
             ss_dir / Path(f'frame{self.instance_id}_r{self.total_reward:.4f}_{self.reset_count}_{name}.jpeg'),
-            self.render(reduce_res=False))
+            image)
 
     def update_max_op_level(self):
         opponent_level = self.read_m(self._opponent_level)

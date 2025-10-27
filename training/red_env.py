@@ -7,6 +7,7 @@ from training.pokemon_env import PokeGymEnv
 class RedGymEnv(PokeGymEnv):
     gb_path = '../PokemonRed.gb'
     simple_name = "red"
+    version_indicator = 1
 
     _map_position_x = 0xD362
     _map_position_y = 0xD361
@@ -78,7 +79,6 @@ class RedGymEnv(PokeGymEnv):
     _event_flags_end = 0xD886
     _museum_ticket = 0xD754
     _event_flags = [i for i in range(_event_flags_start, _event_flags_end)]
-    _event_flags.append(_museum_ticket)
 
     def __init__(
             self, config=None):

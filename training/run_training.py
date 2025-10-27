@@ -109,7 +109,7 @@ if __name__ == '__main__':
     gamma = 0.9926
 
     # agent = PPO('CnnPolicy', env, n_steps=ep_length, batch_size=batch_size, n_epochs=n_epochs,learning_rate=learning_rate, policy_kwargs=policy_kwargs, gamma=gamma)
-    agent = A2C('CnnPolicy', env, n_steps=ep_length, policy_kwargs=policy_kwargs, gamma=gamma)
+    agent = A2C('MultiInputPolicy', env, n_steps=ep_length, policy_kwargs=policy_kwargs, gamma=gamma)
 
     if len(files) > 0:
         file_name = f'{search_folder}/{files[0]}'
