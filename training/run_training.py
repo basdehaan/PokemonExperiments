@@ -39,14 +39,14 @@ def make_env(i, env_conf, seed=0):
 
 if __name__ == '__main__':
 
-    ep_length = 100
-    reset_length = 100 * ep_length
-    num_emulators = 8
+    ep_length = 200
+    reset_length = 10 * ep_length
+    num_emulators = 16
     visible_emulators = 2
     episodes = 10_000
 
-    learning_rate_min = 0.0001
-    learning_rate_max = 0.002
+    learning_rate_min = 0.0005
+    learning_rate_max = 0.0009
     n_epochs = 1
     batch_size = 64
 

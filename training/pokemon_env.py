@@ -17,12 +17,12 @@ from statistics import mean as avg
 
 class PokeGymEnv(Env):
 
-    def __init__(
-            self, config=None):
+    def __init__(self, config=None):
 
         self.debug = config['debug']
         self.s_path = config['session_path']
         self.save_final_state = config['save_final_state']
+        self.minimum_reward_save = 400
         self.random_init_state = False if 'random_init_state' not in config else config['random_init_state']
         self.print_rewards = config['print_rewards']
         self.headless = config['headless']
@@ -88,7 +88,7 @@ class PokeGymEnv(Env):
             WindowEvent.RELEASE_BUTTON_B
         ]
 
-        pixel_factor = 0.5
+        pixel_factor = 0.8
         self.mem_padding = 10
         self.render_output_shape = (int(144 * pixel_factor), int(160 * pixel_factor), 3)
         self.model_input_shape = (
@@ -355,8 +355,8 @@ class PokeGymEnv(Env):
 
         # only reward actual movement
         if current_position != self.direction_reward_last_location:
-            self.total_direction_reward += max(0, (self.direction_reward[action] - self.direction_reward[
-                opposite_action])) / self.direction_reward_decay
+            self.total_direction_reward += (self.direction_reward[action] - self.direction_reward[
+                opposite_action]) / self.direction_reward_decay
             self.direction_reward[action] += 1
             self.direction_reward_last_location = current_position
 
@@ -481,7 +481,8 @@ class PokeGymEnv(Env):
 
         if self.print_rewards and done:
             print('', flush=True)
-        if self.save_final_state and done and self.total_reward > 0:
+        if self.save_final_state and done and self.total_reward > self.minimum_reward_save:
+            self.minimum_reward_save = self.total_reward
             fs_path = self.s_path / Path('final_states') / Path(str(self.class_indicator))
             fs_path.mkdir(parents=True, exist_ok=True)
             # plt.imsave(
