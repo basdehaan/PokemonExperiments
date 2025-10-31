@@ -22,7 +22,7 @@ class PokeGymEnv(Env):
         self.debug = config['debug']
         self.s_path = config['session_path']
         self.save_final_state = config['save_final_state']
-        self.minimum_reward_save = 1000
+        self.minimum_reward_save = 0
         self.random_init_state = False if 'random_init_state' not in config else config['random_init_state']
         self.print_rewards = config['print_rewards']
         self.headless = config['headless']

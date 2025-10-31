@@ -2,9 +2,13 @@ import os
 import random
 from os.path import exists
 from pathlib import Path
-# import uuid
+import numpy as np
+
+from imitation.algorithms import bc
+from imitation.data import types
 
 from gold_env import GoldGymEnv
+from red_env import RedGymEnv
 from stable_baselines3 import PPO, A2C
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.utils import set_random_seed
@@ -15,9 +19,6 @@ from stable_baselines3.common.callbacks import CheckpointCallback
 # print("Using:", torch.cuda.get_device_name(torch.cuda.current_device()))
 
 import pyboy
-
-from training.red_env import RedGymEnv
-
 pyboy.logger.log_level("DISABLE")
 
 
@@ -39,15 +40,20 @@ def make_env(i, env_conf, seed=0):
 
 if __name__ == '__main__':
 
-    ep_length = 300
+    ep_length = 200
     reset_length = 10 * ep_length
     num_emulators = 16
     visible_emulators = 2
-    episodes = 100
+    episodes = 1000
 
     learning_rate = 0.0005
     n_epochs = 2
     batch_size = 64
+
+    human_emulator = True
+    human_emulator_interval = 100
+    observations = []
+    actions = []
 
     types = [
         GoldGymEnv,
@@ -69,20 +75,23 @@ if __name__ == '__main__':
     }
 
 
-    def get_env_config_for_i(i, rand=False):
+    def get_env_config_for_i(i=0, human=False):
         _env = env_config.copy()
-        if rand:
+        if human:
             _env['class'] = random.choice(types)
         else:
             _env['class'] = types[i % len(types)]
-        # if i < len(set(types)) or i < visible_emulators:
+
         if i < visible_emulators:
             # visible windows
             _env['headless'] = False
             _env['random_reload'] = 0
             # _env['rolling_reload'] = -1
-            _env['class'] = types[i % len(types)]
-        _env['class_indicator'] = types.index(_env['class']) / len(set(types))
+
+        if human:
+            _env['headless'] = False
+            _env['random_reload'] = 1
+
         return _env
 
 
@@ -108,7 +117,8 @@ if __name__ == '__main__':
     gamma = 0.9926
 
     # agent = PPO('CnnPolicy', env, n_steps=ep_length, batch_size=batch_size, n_epochs=n_epochs,learning_rate=learning_rate, policy_kwargs=policy_kwargs, gamma=gamma)
-    agent = A2C('MultiInputPolicy', env, n_steps=ep_length, policy_kwargs=policy_kwargs, gamma=gamma, learning_rate=learning_rate)
+    agent = A2C('MultiInputPolicy', env, n_steps=ep_length, policy_kwargs=policy_kwargs, gamma=gamma,
+                learning_rate=learning_rate)
 
     if len(files) > 0:
         file_name = f'{search_folder}/{files[0]}'
@@ -133,6 +143,22 @@ if __name__ == '__main__':
                 agent.rollout_buffer.n_envs = num_emulators
                 agent.rollout_buffer.reset()
 
+    if human_emulator:
+        def obs_convert(obs):
+            return {
+                "battle_type": int(obs["battle_type"]),
+                "party_status": np.array(obs["party_status"], dtype=np.float64),
+                "screen_image": np.array(np.transpose(obs["screen_image"], (2, 0, 1)), dtype=np.uint8),
+                "version": int(obs["version"]),
+            }
+
+        env_settings = get_env_config_for_i(human=True)
+        env_settings['random_reload'] = 1
+        human_env = make_env(-1, env_settings, seed=0)()
+        obs, info = human_env.reset()
+        observations.append(obs_convert(obs))
+        human_env.pyboy.set_emulation_speed(4)
+
     for i in range(episodes):
         print(i + 1, "/", episodes)
         agent.learn(total_timesteps=ep_length * num_emulators,
@@ -140,3 +166,31 @@ if __name__ == '__main__':
                     reset_num_timesteps=False,
                     progress_bar=True,
                     log_interval=num_emulators)
+
+        if human_emulator and i % human_emulator_interval == 0:
+            for a in range(ep_length):
+                action = []
+                while len(action) == 0 or action[0] not in human_env.valid_actions:
+                    human_env.pyboy.tick()
+                    action = human_env.pyboy.get_input()
+
+                action = human_env.valid_actions.index(action[0])
+                actions.append(action)
+                obs, reward, done, truncated, info = human_env.step(action)
+                observations.append(obs_convert(obs))
+
+            # print(agent.observation_space)
+            # print("Observation structure:")
+            # for k, v in observations[1].items():
+            #     print(f"  {k}: type={type(v)}, shape={getattr(v, 'shape', None)}, dtype={getattr(v, 'dtype', None)}")
+
+            observations = [types.DictObs(o) for o in observations]
+
+            traj = types.Trajectory(obs=np.array(observations), acts=np.array(actions, dtype=np.int64), infos=None,
+                                    terminal=True)
+            bc_trainer = bc.BC(observation_space=agent.observation_space, action_space=agent.action_space,
+                               demonstrations=[traj], policy=agent.policy, rng=np.random.default_rng())
+            bc_trainer.train(n_epochs=100)
+
+            human_env.reset()
+            human_env.pyboy.tick()
