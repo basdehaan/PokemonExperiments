@@ -51,11 +51,11 @@ if __name__ == '__main__':
     batch_size = 64
 
     human_emulator = True
-    human_emulator_interval = 100
+    human_emulator_interval = 10
     observations = []
     actions = []
 
-    types = [
+    classes = [
         GoldGymEnv,
         RedGymEnv,
     ]
@@ -78,9 +78,9 @@ if __name__ == '__main__':
     def get_env_config_for_i(i=0, human=False):
         _env = env_config.copy()
         if human:
-            _env['class'] = random.choice(types)
+            _env['class'] = random.choice(classes)
         else:
-            _env['class'] = types[i % len(types)]
+            _env['class'] = classes[i % len(classes)]
 
         if i < visible_emulators:
             # visible windows
@@ -151,6 +151,7 @@ if __name__ == '__main__':
                 "screen_image": np.array(np.transpose(obs["screen_image"], (2, 0, 1)), dtype=np.uint8),
                 "version": int(obs["version"]),
             }
+
 
         env_settings = get_env_config_for_i(human=True)
         env_settings['random_reload'] = 1
