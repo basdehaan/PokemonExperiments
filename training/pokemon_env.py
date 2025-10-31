@@ -22,12 +22,13 @@ class PokeGymEnv(Env):
         self.debug = config['debug']
         self.s_path = config['session_path']
         self.save_final_state = config['save_final_state']
-        self.minimum_reward_save = 400
+        self.minimum_reward_save = 1000
         self.random_init_state = False if 'random_init_state' not in config else config['random_init_state']
         self.print_rewards = config['print_rewards']
         self.headless = config['headless']
         self.knn_vec_dim = 1000
         self.knn_num_elements = 20000  # max
+        self.max_event_rew = 0
         self.check_stuck_mem = []  # red has a bug where the player can disappear and the game is stuck
         self.not_stuck_reward = 0
         self.not_stuck_reward_total = 0
@@ -36,7 +37,6 @@ class PokeGymEnv(Env):
         self.direction_reward_decay = 40
         self.direction_reward_last_location = ""
         self.direction_reward_last_map = ""
-        self.class_indicator = config['class_indicator']
         self.seed = config['seed']
         self.load_once = False if 'load_once' not in config else config['load_once']
         self.random_reload = 0 if 'random_reload' not in config else config['random_reload']
@@ -125,7 +125,7 @@ class PokeGymEnv(Env):
     def set_init_state(self):
         self.init_state = Path(self.gb_path + ".state")  # default to the save where intro/credits has been done
         if self.random_init_state:
-            search_folder = self.s_path / Path("final_states") / Path(str(self.class_indicator))
+            search_folder = self.s_path / Path("final_states") / Path(str(self.version_indicator))
             if search_folder.is_dir():
                 files = [x for x in search_folder.iterdir() if x.is_file()]
                 if len(files) > 0:
@@ -351,15 +351,16 @@ class PokeGymEnv(Env):
         check_stuck_position = f"{map_n}_{x_pos}_{y_pos}_{battle_type}"
 
         self.check_stuck_mem.append(check_stuck_position)
-        check_stuck_len = min(300, self.max_steps)
+        check_stuck_len = min(500, self.max_steps)
         self.check_stuck_mem = self.check_stuck_mem[-check_stuck_len:]
         self.not_stuck_reward = len(list(set(self.check_stuck_mem))) / check_stuck_len
-        self.not_stuck_reward_total += self.not_stuck_reward - .1
-        if (battle_type == 0  # TODO: fix for when menu is included in gameplay
+        self.not_stuck_reward_total += self.not_stuck_reward - .2
+        if (map_n == "0_40" # todo: for now really specific for the bug in red
+                and battle_type == 0  # TODO: fix for when menu is included in gameplay
                 and self.seen_coords is not None
                 and len(self.seen_coords) > 10  # to make sure it gets through the intro
                 and len(list(set(self.check_stuck_mem))) == 1):
-            self.save_screenshot("stuck")
+            self.save_screenshot(f"stuck__{check_stuck_position}__{battle_type}")
             self.loaded = False
             self.reset(self.seed)
 
@@ -429,7 +430,7 @@ class PokeGymEnv(Env):
             print('', flush=True)
         if self.save_final_state and done and self.total_reward > self.minimum_reward_save:
             self.minimum_reward_save = self.total_reward
-            fs_path = self.s_path / Path('final_states') / Path(str(self.class_indicator))
+            fs_path = self.s_path / Path('final_states') / Path(str(self.version_indicator))
             fs_path.mkdir(parents=True, exist_ok=True)
             # plt.imsave(
             #     fs_path / Path(f'frame_r{self.total_reward:.4f}_{self.reset_count}_small.jpeg'),
@@ -547,23 +548,23 @@ class PokeGymEnv(Env):
         # addresses from https://datacrystal.romhacking.net/wiki/Pok%C3%A9mon_Red/Blue:RAM_map
         # https://github.com/pret/pokered/blob/91dc3c9f9c8fd529bb6e8307b58b96efa0bec67e/constants/event_constants.asm
         state_scores = {
-            'event': self.reward_scale * self.update_max_event_reward() * 10,
-            'level': self.reward_scale * self.get_levels_reward() * 40,
+            'event': self.reward_scale * self.update_max_event_reward() ** 2,
+            'level': self.reward_scale * self.get_levels_reward() * 5,
             # 'xp': self.reward_scale * self.get_xp_reward() * 0.01,
             'items': self.reward_scale * self.get_items_reward(),
             'heal': self.reward_scale * self.total_healing_reward,
-            'op_lvl': self.reward_scale * self.update_max_op_level() * 20,
-            'op_dmg': self.reward_scale * self.total_damage_reward * 10,
+            'op_lvl': self.reward_scale * self.update_max_op_level(),
+            'op_dmg': self.reward_scale * self.total_damage_reward,
             # 'dead': self.reward_scale * -1.0 * self.died_count,
             # 'badge': self.reward_scale * self.get_badges() * 10,
             # 'hms': self.reward_scale * self.get_hms() * 5,
             # 'money': self.reward_scale * money * 3,
-            'seen_count': self.reward_scale * self.get_seen_count() * 10,
+            'seen_count': self.reward_scale * self.get_seen_count(),
             # 'caught_count': self.reward_scale * self.get_caught_count(),
-            'explore': self.reward_scale * self.explore_weight * self.get_explore_reward() * 5,
-            'map_explore': self.reward_scale * self.get_maps_explored() * 50,
-            'unstuck': self.not_stuck_reward_total,
-            'stable_direction': self.total_direction_reward / 3,
+            'explore': self.reward_scale * self.explore_weight * self.get_explore_reward(),
+            'map_explore': self.reward_scale * self.get_maps_explored() * 5,
+            'unstuck': self.not_stuck_reward_total * 0.05,
+            # 'stable_direction': self.total_direction_reward / 3,
             'neg_steps': -0.01 if self.read_battle_type() == 0 else 0,
         }
 

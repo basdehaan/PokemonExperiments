@@ -39,15 +39,14 @@ def make_env(i, env_conf, seed=0):
 
 if __name__ == '__main__':
 
-    ep_length = 200
+    ep_length = 300
     reset_length = 10 * ep_length
     num_emulators = 16
     visible_emulators = 2
-    episodes = 10_000
+    episodes = 100
 
-    learning_rate_min = 0.0005
-    learning_rate_max = 0.0009
-    n_epochs = 1
+    learning_rate = 0.0005
+    n_epochs = 2
     batch_size = 64
 
     types = [
@@ -65,7 +64,7 @@ if __name__ == '__main__':
         'save_stats_and_runs': False, 'random_init_state': True,
         'print_rewards': False, 'save_video': False, 'fast_video': True, 'session_path': sess_path,
         'debug': False, 'sim_frame_dist': 500_000.0,
-        'explore_method': 'HYBRID', 'extra_buttons': False, 'explore_weight': 1,
+        'explore_method': 'STEPS', 'extra_buttons': False, 'explore_weight': 1,
         'noise': 0.0
     }
 
@@ -109,7 +108,7 @@ if __name__ == '__main__':
     gamma = 0.9926
 
     # agent = PPO('CnnPolicy', env, n_steps=ep_length, batch_size=batch_size, n_epochs=n_epochs,learning_rate=learning_rate, policy_kwargs=policy_kwargs, gamma=gamma)
-    agent = A2C('MultiInputPolicy', env, n_steps=ep_length, policy_kwargs=policy_kwargs, gamma=gamma)
+    agent = A2C('MultiInputPolicy', env, n_steps=ep_length, policy_kwargs=policy_kwargs, gamma=gamma, learning_rate=learning_rate)
 
     if len(files) > 0:
         file_name = f'{search_folder}/{files[0]}'
@@ -122,7 +121,7 @@ if __name__ == '__main__':
                 agent.batch_size = batch_size
                 agent.n_steps = ep_length
                 agent.n_epochs = n_epochs
-                agent.learning_rate = learning_rate_min + (random.random() * (learning_rate_max - learning_rate_min))
+                agent.learning_rate = learning_rate
                 agent.rollout_buffer.buffer_size = ep_length
                 agent.rollout_buffer.n_envs = num_emulators
                 agent.rollout_buffer.reset()
