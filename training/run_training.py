@@ -11,7 +11,6 @@ from gold_env import GoldGymEnv
 from red_env import RedGymEnv
 from stable_baselines3 import PPO, A2C
 from stable_baselines3.common.vec_env import SubprocVecEnv
-from stable_baselines3.common.utils import set_random_seed
 from stable_baselines3.common.callbacks import CheckpointCallback
 
 # import torch
@@ -19,6 +18,7 @@ from stable_baselines3.common.callbacks import CheckpointCallback
 # print("Using:", torch.cuda.get_device_name(torch.cuda.current_device()))
 
 import pyboy
+
 pyboy.logger.log_level("DISABLE")
 
 
@@ -34,15 +34,14 @@ def make_env(i, env_conf, seed=0):
         _env.reset(seed=(seed + i))
         return _env
 
-    set_random_seed(seed)
     return _init
 
 
 if __name__ == '__main__':
 
-    ep_length = 200
+    ep_length = 100
     reset_length = 10 * ep_length
-    num_emulators = 16
+    num_emulators = 20
     visible_emulators = 2
     episodes = 1000
 
@@ -52,8 +51,7 @@ if __name__ == '__main__':
 
     human_emulator = True
     human_emulator_interval = 10
-    observations = []
-    actions = []
+    human_emulator_interval_increment = 10
 
     classes = [
         GoldGymEnv,
@@ -152,9 +150,10 @@ if __name__ == '__main__':
                 "version": int(obs["version"]),
             }
 
+        observations = []
+        actions = []
 
         env_settings = get_env_config_for_i(human=True)
-        env_settings['random_reload'] = 1
         human_env = make_env(-1, env_settings, seed=0)()
         obs, info = human_env.reset()
         observations.append(obs_convert(obs))
@@ -169,6 +168,7 @@ if __name__ == '__main__':
                     log_interval=num_emulators)
 
         if human_emulator and i % human_emulator_interval == 0:
+            human_emulator_interval += human_emulator_interval_increment
             for a in range(ep_length):
                 action = []
                 while len(action) == 0 or action[0] not in human_env.valid_actions:
@@ -178,6 +178,7 @@ if __name__ == '__main__':
                 action = human_env.valid_actions.index(action[0])
                 actions.append(action)
                 obs, reward, done, truncated, info = human_env.step(action)
+                print({k:v for k, v in obs.items() if k != "screen_image"})
                 observations.append(obs_convert(obs))
 
             # print(agent.observation_space)
