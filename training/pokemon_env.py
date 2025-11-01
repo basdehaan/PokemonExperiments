@@ -196,11 +196,13 @@ class PokeGymEnv(Env):
         self.base_explore = 0
         self.max_opponent_level = 0
         self.max_event_rew = 0
+        self.not_stuck_reward_total = 0
         self.max_level_rew = 0
         self.last_health = 1
         self.last_opp_health = 1
         self.total_damage_reward = 0
         self.latest_healing_reward = 0
+        self.total_direction_reward = 0
         self.total_healing_reward = 0
         self.died_count = 0
         self.step_count = 0

@@ -43,15 +43,15 @@ if __name__ == '__main__':
     reset_length = 10 * ep_length
     num_emulators = 20
     visible_emulators = 2
-    episodes = 1000
+    episodes = 10000
 
     learning_rate = 0.0005
     n_epochs = 2
     batch_size = 64
 
-    human_emulator = True
-    human_emulator_interval = 10
-    human_emulator_interval_increment = 10
+    human_emulator = False
+    human_emulator_interval = 100
+    human_emulator_interval_increment = 100
 
     classes = [
         GoldGymEnv,
@@ -141,24 +141,6 @@ if __name__ == '__main__':
                 agent.rollout_buffer.n_envs = num_emulators
                 agent.rollout_buffer.reset()
 
-    if human_emulator:
-        def obs_convert(obs):
-            return {
-                "battle_type": int(obs["battle_type"]),
-                "party_status": np.array(obs["party_status"], dtype=np.float64),
-                "screen_image": np.array(np.transpose(obs["screen_image"], (2, 0, 1)), dtype=np.uint8),
-                "version": int(obs["version"]),
-            }
-
-        observations = []
-        actions = []
-
-        env_settings = get_env_config_for_i(human=True)
-        human_env = make_env(-1, env_settings, seed=0)()
-        obs, info = human_env.reset()
-        observations.append(obs_convert(obs))
-        human_env.pyboy.set_emulation_speed(4)
-
     for i in range(episodes):
         print(i + 1, "/", episodes)
         agent.learn(total_timesteps=ep_length * num_emulators,
@@ -169,6 +151,24 @@ if __name__ == '__main__':
 
         if human_emulator and i % human_emulator_interval == 0:
             human_emulator_interval += human_emulator_interval_increment
+
+            def obs_convert(obs):
+                return {
+                    "battle_type": int(obs["battle_type"]),
+                    "party_status": np.array(obs["party_status"], dtype=np.float64),
+                    "screen_image": np.array(np.transpose(obs["screen_image"], (2, 0, 1)), dtype=np.uint8),
+                    "version": int(obs["version"]),
+                }
+
+            observations = []
+            actions = []
+
+            env_settings = get_env_config_for_i(human=True)
+            human_env = make_env(-1, env_settings, seed=0)()
+            obs, info = human_env.reset()
+            observations.append(obs_convert(obs))
+            human_env.pyboy.set_emulation_speed(3)
+
             for a in range(ep_length):
                 action = []
                 while len(action) == 0 or action[0] not in human_env.valid_actions:
@@ -194,5 +194,5 @@ if __name__ == '__main__':
                                demonstrations=[traj], policy=agent.policy, rng=np.random.default_rng())
             bc_trainer.train(n_epochs=100)
 
-            human_env.reset()
-            human_env.pyboy.tick()
+            human_env.pyboy.stop(save=False)
+            del human_env
